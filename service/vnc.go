@@ -7,55 +7,73 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/core"
 	"golang.org/x/crypto/ssh"
 )
 
-// GenerateSSHKeypair 瞬间生成一对 2048 位的临时 RSA 密钥（用完即焚）
+// GenerateSSHKeypair 瞬间生成一对临时 RSA 密钥
 func GenerateSSHKeypair() (string, string, error) {
-	// 1. 生成私钥
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", err
 	}
-
-	// 将私钥转成 PEM 格式字符串（Go 留着自己用）
 	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
-	privBlock := pem.Block{
-		Type:    "RSA PRIVATE KEY",
-		Headers: nil,
-		Bytes:   privDER,
-	}
+	privBlock := pem.Block{Type: "RSA PRIVATE KEY", Bytes: privDER}
 	privatePEM := string(pem.EncodeToMemory(&privBlock))
 
-	// 2. 生成对应的公钥 (OpenSSH 格式，扔给 Oracle 机房用)
 	publicRsaKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return "", "", err
 	}
-	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
-	publicKey := string(pubKeyBytes)
-
-	return privatePEM, publicKey, nil
+	return privatePEM, string(ssh.MarshalAuthorizedKey(publicRsaKey)), nil
 }
 
-// CreateVNCConnection 向 Oracle 申请开启底层串口通道
+// CreateVNCConnection 申请通道（带自动清理幽灵通道功能）
 func CreateVNCConnection(accountID int, instanceID string) (core.InstanceConsoleConnection, string, error) {
-	// 复用我们之前写好的底层 OCI 客户端（自带代理和解密）
 	computeClient, _, _, err := buildClient(accountID)
 	if err != nil {
 		return core.InstanceConsoleConnection{}, "", err
 	}
 
-	// 1. 制造一次性钥匙
+	// 🚀 第一步：清道夫模式。查找并删除残留的僵尸通道
+	getInstReq := core.GetInstanceRequest{InstanceId: common.String(instanceID)}
+	instResp, err := computeClient.GetInstance(context.Background(), getInstReq)
+	
+	if err == nil && instResp.CompartmentId != nil {
+		listReq := core.ListInstanceConsoleConnectionsRequest{
+			CompartmentId: instResp.CompartmentId,
+			InstanceId:    common.String(instanceID),
+		}
+		listResp, err := computeClient.ListInstanceConsoleConnections(context.Background(), listReq)
+		if err == nil {
+			cleaned := false
+			for _, cc := range listResp.Items {
+				// 发现活跃的旧通道，直接发送销毁指令
+				if cc.LifecycleState == core.InstanceConsoleConnectionLifecycleStateActive || 
+				   cc.LifecycleState == core.InstanceConsoleConnectionLifecycleStateCreating {
+					delReq := core.DeleteInstanceConsoleConnectionRequest{
+						InstanceConsoleConnectionId: cc.Id,
+					}
+					_, _ = computeClient.DeleteInstanceConsoleConnection(context.Background(), delReq)
+					cleaned = true
+				}
+			}
+			// 如果刚刚删除了旧通道，让程序等 4 秒钟，给甲骨文后台释放资源的时间
+			if cleaned {
+				time.Sleep(4 * time.Second)
+			}
+		}
+	}
+
+	// 🚀 第二步：正式生成一次性钥匙，申请新通道
 	privateKey, publicKey, err := GenerateSSHKeypair()
 	if err != nil {
 		return core.InstanceConsoleConnection{}, "", fmt.Errorf("生成临时密钥失败: %v", err)
 	}
 
-	// 2. 拿着公钥，向甲骨文申请开通这台机器的 Console 权限
 	req := core.CreateInstanceConsoleConnectionRequest{
 		CreateInstanceConsoleConnectionDetails: core.CreateInstanceConsoleConnectionDetails{
 			InstanceId: common.String(instanceID),
@@ -68,11 +86,10 @@ func CreateVNCConnection(accountID int, instanceID string) (core.InstanceConsole
 		return core.InstanceConsoleConnection{}, "", fmt.Errorf("申请 Oracle VNC 通道被拒绝: %v", err)
 	}
 
-	// 成功！返回甲骨文给的通道信息，以及我们手里的私钥
 	return resp.InstanceConsoleConnection, privateKey, nil
 }
 
-// DeleteVNCConnection 扫尾工作：用完的通道必须删掉，保持云端干净
+// DeleteVNCConnection 用户主动关掉网页时的扫尾动作
 func DeleteVNCConnection(accountID int, consoleConnectionID string) error {
 	computeClient, _, _, err := buildClient(accountID)
 	if err != nil {
