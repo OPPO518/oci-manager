@@ -46,9 +46,10 @@ func addAccountHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
 	
-	var req service.OCICredentials
+	// 【已修复】删除了多余的 var req 声明
 	var body struct {
-		Name, ProxyURL string
+		Name     string `json:"name"`
+		ProxyURL string `json:"proxy_url"`
 		service.OCICredentials
 	}
 	json.NewDecoder(r.Body).Decode(&body)
@@ -134,7 +135,7 @@ func main() {
 	http.HandleFunc("/api/accounts/add", addAccountHandler)
 	http.HandleFunc("/api/accounts/list", listAccountsHandler)
 	http.HandleFunc("/api/instances", getInstancesHandler)
-	http.HandleFunc("/api/instances/action", actionHandler) // 挂载电源路由
+	http.HandleFunc("/api/instances/action", actionHandler) 
 	
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
