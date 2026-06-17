@@ -31,7 +31,6 @@
         button.btn-stop { background-color: #D32F2F; } button.btn-stop:hover { background-color: #B71C1C; }
         button.btn-reboot { background-color: #F57C00; } button.btn-reboot:hover { background-color: #E65100; }
         button.btn-vnc { background-color: #161514; border: 1px solid #555; } button.btn-vnc:hover { background-color: #000; }
-        /* 🚀 新增同步按钮样式 */
         button.btn-sync { background-color: #1976D2; color: white; float: right;} button.btn-sync:hover { background-color: #1565C0; }
 
         .file-upload-box { border: 2px dashed #CCC; padding: 20px; text-align: center; border-radius: 4px; cursor: pointer; background: #FAFAFA; transition: border-color 0.3s; margin-bottom: 15px;}
@@ -75,7 +74,7 @@
             <div v-if="!isLoggedIn" class="card" style="max-width: 400px; margin: 60px auto;">
                 <h2 style="margin-top:0;">系统登录</h2>
                 <div class="form-group"><label>用户名</label><input type="text" v-model="loginForm.username"></div>
-                <div class="form-group"><label>密 码</label><input type="password" v-model="loginForm.password"></div>
+                <div class="form-group"><label>密 码</label><input type="password" v-model="loginForm.password" @keyup.enter="doLogin"></div>
                 <button style="width:100%" @click="doLogin" :disabled="loading">{{ loading ? '验证中...' : '登 录' }}</button>
                 <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
             </div>
@@ -144,7 +143,32 @@
                 </div>
 
                 <div v-if="currentTab === 'add'" class="card">
-                     </div>
+                    <h3 style="margin-top:0; margin-bottom: 20px;">新增安全托管</h3>
+                    <div class="form-group"><label>API配置快速导入 (请粘贴 Oracle Cloud API 配置文件内容)</label><textarea v-model="rawConfigText" rows="6"></textarea></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>UserName (备注名称)</label><input type="text" v-model="newAccount.name"></div>
+                        <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>User (API user)</label><input type="text" v-model="newAccount.user"></div>
+                        <div class="form-group"><label>Fingerprint</label><input type="text" v-model="newAccount.fingerprint"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Tenancy (API tenancy)</label><input type="text" v-model="newAccount.tenancy"></div>
+                        <div class="form-group"><label>Region</label><input type="text" v-model="newAccount.region"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>密钥文件 (上传 .pem 私钥文件自动读取)</label>
+                        <label class="file-upload-box" style="display: block;">
+                            <input type="file" @change="handleFileUpload" accept=".pem,.txt">
+                            <span class="file-upload-label">📁 点击选择文件或拖拽文件到此处</span>
+                            <div v-if="keyLoaded" class="file-success">✔️ 私钥文件读取成功</div>
+                        </label>
+                    </div>
+                    <button @click="submitNewAccount" :disabled="loading || !newAccount.private_key">安全保存凭证</button>
+                    <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+                    <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
+                </div>
             </div>
         </div>
 
@@ -164,7 +188,7 @@
         createApp({
             setup() {
                 const isLoggedIn = ref(false); const loading = ref(false); const actionLoading = ref(false); 
-                const isSyncing = ref(false); // 🚀 同步按钮的独立 Loading 状态
+                const isSyncing = ref(false);
                 const errorMsg = ref(''); const successMsg = ref(''); const instances = ref(null); const currentTab = ref('list');
                 const accounts = ref([]); const loginForm = ref({ username: '', password: '' });
                 const rawConfigText = ref(''); const keyLoaded = ref(false);
@@ -174,8 +198,22 @@
                 const vncActive = ref(false); const vncTargetName = ref('');
                 let socket = null; let term = null; let fitAddon = null;
 
-                // (中间的基础方法 handleFileUpload, checkAuthError, 等完全保持原样)
-                
+                watch(rawConfigText, (newText) => {
+                    const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
+                    if(extract('user')) newAccount.value.user = extract('user');
+                    if(extract('fingerprint')) newAccount.value.fingerprint = extract('fingerprint');
+                    if(extract('tenancy')) newAccount.value.tenancy = extract('tenancy');
+                    if(extract('region')) newAccount.value.region = extract('region');
+                });
+
+                const handleFileUpload = (event) => {
+                    const file = event.target.files[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => { newAccount.value.private_key = e.target.result; keyLoaded.value = true; errorMsg.value = ''; };
+                    reader.onerror = () => { errorMsg.value = '文件读取失败'; keyLoaded.value = false; }
+                    reader.readAsText(file);
+                };
+
                 const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('oci_token') });
                 const checkAuthError = (status) => { if (status === 401) { logout(); return true; } return false; };
 
@@ -185,7 +223,34 @@
                     window.addEventListener('resize', () => { if (term && fitAddon && vncActive.value) { try{ fitAddon.fit(); }catch(e){} } });
                 });
 
-                const doLogin = async () => { /* 登录保持不变 */ };
+                // 🚀 彻底修复：还原完整的登录逻辑，绝不再用注释折叠
+                const doLogin = async () => {
+                    if (!loginForm.value.username || !loginForm.value.password) {
+                        errorMsg.value = "请输入用户名和密码";
+                        return;
+                    }
+                    loading.value = true; errorMsg.value = '';
+                    try {
+                        const res = await fetch('/api/login', { 
+                            method: 'POST', 
+                            headers: {'Content-Type': 'application/json'}, 
+                            body: JSON.stringify(loginForm.value) 
+                        });
+                        const data = await res.json();
+                        if (res.ok) { 
+                            localStorage.setItem('oci_token', data.token); 
+                            isLoggedIn.value = true; 
+                            loadAccounts(); 
+                        } else { 
+                            errorMsg.value = data.error; 
+                        }
+                    } catch (e) { 
+                        errorMsg.value = "网络错误，请检查服务端是否运行"; 
+                    } finally { 
+                        loading.value = false; 
+                    }
+                };
+
                 const logout = () => { localStorage.removeItem('oci_token'); isLoggedIn.value = false; instances.value = null; };
                 const switchTab = (tab) => { currentTab.value = tab; errorMsg.value = ''; successMsg.value = ''; instances.value = null; if(tab === 'list') loadAccounts(); };
                 
@@ -197,7 +262,6 @@
                     } catch (e) { console.error(e); }
                 };
 
-                // 🚀 核心新增 1：0延迟读取数据库快照
                 const loadCache = async (id) => {
                     errorMsg.value = ''; successMsg.value = ''; instances.value = null;
                     try {
@@ -211,7 +275,6 @@
                     } catch (e) { errorMsg.value = "快照读取失败：" + e; }
                 };
 
-                // 🚀 核心新增 2：主动触发甲骨文接口深度同步并写缓存
                 const syncCloud = async (id) => {
                     isSyncing.value = true; errorMsg.value = ''; successMsg.value = '';
                     try {
@@ -221,12 +284,11 @@
                         if (res.ok) { 
                             instances.value = data.instances || []; 
                             successMsg.value = "云端数据同步完成，快照已更新！";
-                            setTimeout(() => { successMsg.value = ''; }, 3000); // 3秒后提示消失
+                            setTimeout(() => { successMsg.value = ''; }, 3000);
                         } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "同步失败：" + e; } finally { isSyncing.value = false; }
                 };
 
-                // sendAction 改造：发送电源指令后，等待 3 秒，强制触发一次云端 Sync
                 const sendAction = async (instanceId, action) => {
                     if(!confirm(`确定要执行 [${action}] 吗？`)) return;
                     actionLoading.value = true; errorMsg.value = ''; successMsg.value = '';
@@ -236,13 +298,53 @@
                         if (checkAuthError(res.status)) return;
                         if (res.ok) { 
                             successMsg.value = data.message; 
-                            setTimeout(() => syncCloud(currentAccountID.value), 3000); // 🚀 自动刷入最新状态
+                            setTimeout(() => syncCloud(currentAccountID.value), 3000); 
                         } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "请求失败：" + e; } finally { actionLoading.value = false; }
                 };
 
-                const openVNCTerminal = (instanceId, displayName) => { /* 保持你之前那版的无敌 VNC 逻辑完全不变 */ };
-                const closeVNCTerminal = () => { /* 保持不变 */ };
+                // 🚀 彻底还原：完整的双向 VNC 终端连接逻辑
+                const openVNCTerminal = (instanceId, displayName) => {
+                    vncTargetName.value = displayName;
+                    vncActive.value = true;
+
+                    nextTick(() => {
+                        term = new Terminal({ cursorBlink: true, theme: { background: '#000000', foreground: '#FFFFFF' }});
+                        fitAddon = new FitAddon.FitAddon();
+                        term.loadAddon(fitAddon);
+                        
+                        const container = document.getElementById('terminal-container');
+                        term.open(container);
+                        
+                        setTimeout(() => { fitAddon.fit(); }, 50);
+
+                        const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+                        socket = new WebSocket(`${protocol}${location.host}/api/vnc?account_id=${currentAccountID.value}&instance_id=${instanceId}`);
+                        
+                        socket.onmessage = (event) => {
+                            if (event.data instanceof Blob) {
+                                const reader = new FileReader();
+                                reader.onload = () => term.write(new Uint8Array(reader.result));
+                                reader.readAsArrayBuffer(event.data);
+                            } else {
+                                term.write(event.data);
+                            }
+                        };
+
+                        term.onData((data) => {
+                            if (socket && socket.readyState === WebSocket.OPEN) { socket.send(data); }
+                        });
+
+                        socket.onclose = () => term.write('\r\n[系统通知] 安全控制台长连接已正常安全挂断。\r\n');
+                        socket.onerror = () => term.write('\r\n[系统错误] 代理中转网络通道握手崩溃。\r\n');
+                    });
+                };
+
+                const closeVNCTerminal = () => {
+                    if (socket) { socket.close(); socket = null; }
+                    if (term) { term.dispose(); term = null; fitAddon = null; }
+                    vncActive.value = false;
+                };
 
                 return { 
                     isLoggedIn, loading, actionLoading, isSyncing, errorMsg, successMsg, instances, currentTab, accounts, 
