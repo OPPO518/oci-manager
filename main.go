@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"oci-manager/service"
 	"github.com/gorilla/websocket"
@@ -15,12 +17,10 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// WebSocket 升级器配置
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// ================= 安全拦截器 =================
 func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -32,8 +32,6 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
-
-// ================= API 接口区域 =================
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -142,23 +140,20 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "指令已下发！状态即将更新。"})
 }
 
-// 🚀 终极硬核：无缝中转 VNC 数据流的 WebSocket 桥接处理器
+// 🚀 VNC 终极处理引擎 (包含握手重试机制)
 func vncHandler(w http.ResponseWriter, r *http.Request) {
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("account_id"))
 	instanceID := r.URL.Query().Get("instance_id")
 
-	// 1. 握手升级为 WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil { return }
 	defer conn.Close()
 
-	// 2. 调用 VNC 引擎创建云端连接并拿到内存临时私钥
 	console, privKeyStr, err := service.CreateVNCConnection(accountID, instanceID)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 创建 OCI 控制台连接失败: "+err.Error()+"\r\n"))
 		return
 	}
-	// 确保用户断开 Web 界面时，自动销毁云端的独占控制台通道，防不留痕迹的安全隐患
 	defer service.DeleteVNCConnection(accountID, *console.Id)
 
 	if console.ConnectionString == nil {
@@ -166,14 +161,12 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 深度解析甲骨文复杂的 SSH 代理命令字串
 	username, host, err := parseConnectionString(*console.ConnectionString)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 解析连接字符串失败: "+err.Error()+"\r\n"))
 		return
 	}
 
-	// 4. 从数据库提取当前账号绑定的专属代理，防止 VPS 公网 IP 暴露泄密
 	var proxyStr string
 	err = service.DB.QueryRow("SELECT proxy_url FROM oci_accounts WHERE id = ?", accountID).Scan(&proxyStr)
 	if err != nil {
@@ -187,21 +180,12 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. 劫持原生 TCP 拨号，强行注入 SOCKS5 代理网络建立安全连接
 	dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 初始化代理拨号器失败: "+err.Error()+"\r\n"))
 		return
 	}
 
-	netConn, err := dialer.Dial("tcp", fmt.Sprintf("%s:443", host))
-	if err != nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 通过代理物理隔离通道连接终端服务器失败: "+err.Error()+"\r\n"))
-		return
-	}
-	defer netConn.Close()
-
-	// 6. 配置底层客户端 SSH 握手协议
 	signer, err := ssh.ParsePrivateKey([]byte(privKeyStr))
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 内存解析临时私钥失败: "+err.Error()+"\r\n"))
@@ -211,15 +195,36 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	sshConfig := &ssh.ClientConfig{
 		User: username,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // 串口网关为动态指纹，强制放行
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), 
 	}
 
-	// 7. 在代理隧道内部打通 SSH 二层会话
-	sshConn, chans, reqs, err := ssh.NewClientConn(netConn, fmt.Sprintf("%s:443", host), sshConfig)
-	if err != nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 建立底层网络 SSH 握手失败: "+err.Error()+"\r\n"))
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 正在等待 Oracle 底层分配通道权限 (约需 5-15 秒，请耐心等待)...\r\n"))
+
+	var netConn net.Conn
+	var sshConn ssh.Conn
+	var chans <-chan ssh.NewChannel
+	var reqs <-chan *ssh.Request
+	var errConnect error
+
+	// 🚀 核心修复：加入重试机制，给 Oracle 15*2=30秒 的时间注入公钥
+	for i := 0; i < 15; i++ {
+		netConn, errConnect = dialer.Dial("tcp", fmt.Sprintf("%s:443", host))
+		if errConnect == nil {
+			sshConn, chans, reqs, errConnect = ssh.NewClientConn(netConn, fmt.Sprintf("%s:443", host), sshConfig)
+			if errConnect == nil {
+				break // 握手成功！跳出等待循环
+			}
+			netConn.Close() // 握手失败，关掉网络通道准备下一次重试
+		}
+		time.Sleep(2 * time.Second) // 睡 2 秒再敲门
+	}
+
+	if errConnect != nil {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 底层网络 SSH 握手超时失败: "+errConnect.Error()+"\r\n"))
 		return
 	}
+	defer netConn.Close()
+
 	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
 
@@ -230,7 +235,6 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer session.Close()
 
-	// 请求分配伪终端伪装成标准的 xterm 模式
 	modes := ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
 	if err := session.RequestPty("xterm", 40, 100, modes); err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 请求分配虚拟终端失败: "+err.Error()+"\r\n"))
@@ -245,22 +249,17 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. 真正的双向全双工异步搬运工（零占位符，纯字节流转发）
 	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 安全通道已桥接！正在打通甲骨文物理机房串口控制台... <<<\r\n\r\n"))
 
-	// 协程 A：将 Oracle 底层丢出来的物理主板画面 ➔ 毫秒级灌入用户的 Web 网页
 	go func() {
 		buf := make([]byte, 2048)
 		for {
 			n, err := stdout.Read(buf)
-			if n > 0 {
-				_ = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
-			}
+			if n > 0 { _ = conn.WriteMessage(websocket.BinaryMessage, buf[:n]) }
 			if err != nil { break }
 		}
 	}()
 
-	// 协程 B（主线程）：将用户在网页浏览器上敲击键盘的动作 ➔ 毫秒级灌入甲骨文物理串口
 	for {
 		msgType, msg, err := conn.ReadMessage()
 		if err != nil { break }
@@ -270,27 +269,19 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 辅助工具函数：精准解构甲骨文反人类的 ProxyCommand 连接字符串
 func parseConnectionString(connStr string) (username, host string, err error) {
-	// 典型格式: ssh -o ProxyCommand="ssh -W %h:%p -p 443 ocid1.instanceconsoleconnection...@instance-console.ap-seoul-1.oraclecloud.com" ocid1.instance...
 	pIdx := strings.Index(connStr, "-p 443 ")
-	if pIdx == -1 {
-		return "", "", fmt.Errorf("未匹配到标准端口 443 路由标记")
-	}
+	if pIdx == -1 { return "", "", fmt.Errorf("未匹配到标准端口 443 路由标记") }
 	sub := connStr[pIdx+7:]
 	quoteIdx := strings.Index(sub, "\"")
 	if quoteIdx == -1 {
-		quoteIdx = strings.Index(sub, "'") // 兼容单引号解析
-		if quoteIdx == -1 {
-			return "", "", fmt.Errorf("连接串语法边界异常")
-		}
+		quoteIdx = strings.Index(sub, "'") 
+		if quoteIdx == -1 { return "", "", fmt.Errorf("连接串语法边界异常") }
 	}
-	targetBlock := sub[:quoteIdx] // 提取出: ocid1.xxx@instance-console.xxx
+	targetBlock := sub[:quoteIdx] 
 
 	atIdx := strings.Index(targetBlock, "@")
-	if atIdx == -1 {
-		return "", "", fmt.Errorf("未发现特权用户分界符")
-	}
+	if atIdx == -1 { return "", "", fmt.Errorf("未发现特权用户分界符") }
 	username = targetBlock[:atIdx]
 	host = targetBlock[atIdx+1:]
 	return username, host, nil
@@ -298,7 +289,6 @@ func parseConnectionString(connStr string) (username, host string, err error) {
 
 // ================= 主函数启动区域 =================
 func main() {
-	// 严格检查初始化错误，保障系统不带病上线
 	if err := service.InitDB(); err != nil {
 		fmt.Println("❌ 数据库初始化致命错误:", err)
 		return
@@ -311,7 +301,7 @@ func main() {
 	http.HandleFunc("/api/accounts/delete", deleteAccountHandler) 
 	http.HandleFunc("/api/instances", getInstancesHandler)
 	http.HandleFunc("/api/instances/action", actionHandler) 
-	http.HandleFunc("/api/vnc", vncHandler) // 挂载终极网络武器接口
+	http.HandleFunc("/api/vnc", vncHandler) 
 	
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
