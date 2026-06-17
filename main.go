@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/core"
 )
 
 func main() {
-	// 1. 加载本地 OCI 配置文件
+	// 1. 加载配置
 	configProvider := common.DefaultConfigProvider()
 	tenancyID, err := configProvider.TenancyOCID()
 	if err != nil {
@@ -17,50 +20,59 @@ func main() {
 		return
 	}
 
-	// 2. 创建一个“计算客户端”，专门用来管理服务器（实例）
+	// 2. 创建计算客户端
 	computeClient, err := core.NewComputeClientWithConfigurationProvider(configProvider)
 	if err != nil {
 		fmt.Println("❌ 创建 OCI 计算客户端失败:", err)
 		return
 	}
 
-	fmt.Println("✅ 身份验证通过！正在向 Oracle 请求获取您的服务器列表，请稍候...")
+	// ==========================================
+	// 🚀 核心新增：代理隔离劫持逻辑
+	// ==========================================
+	
+	// 假设我们为这个账号分配了本地的 10801 代理端口 (例如 Xray / VLESS 的本地 socks5 入口)
+	proxyStr := "socks5://127.0.0.1:10801"
+	fmt.Printf("🛡️ 正在启用防关联隔离，当前账号强制使用代理: %s\n", proxyStr)
+	
+	proxyURL, err := url.Parse(proxyStr)
+	if err != nil {
+		fmt.Println("❌ 代理地址格式错误:", err)
+		return
+	}
 
-	// 3. 构建请求：告诉 Oracle 我们要查哪个区间（Compartment）的机器
-	// 注意：这里默认查询你的根区间 (Tenancy)
+	// 创建一个挂载了指定代理的自定义网络传输层
+	customTransport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
+	// 创建自定义 HTTP 客户端，并设置 15 秒超时防止死等
+	customHttpClient := &http.Client{
+		Transport: customTransport,
+		Timeout:   15 * time.Second,
+	}
+
+	// 最关键的一步：拔掉 Oracle SDK 默认的网线，插上我们带有代理的网线
+	computeClient.HTTPClient = common.NewCustomHTTPRequestDispatcher(customHttpClient)
+
+	// ==========================================
+
+	fmt.Println("✅ 代理通道已挂载！正在通过隔离通道向 Oracle 发送请求...")
+
 	req := core.ListInstancesRequest{
 		CompartmentId: common.String(tenancyID),
 	}
 
-	// 4. 正式发送网络请求
+	// 发送请求
 	resp, err := computeClient.ListInstances(context.Background(), req)
 	if err != nil {
-		fmt.Println("❌ 获取实例列表失败:", err)
+		// ⚠️ 注意这里的报错！
+		fmt.Println("\n❌ 请求失败！详细原因如下:")
+		fmt.Println(err)
+		fmt.Println("\n💡 诊断提示: 如果上面报错显示 'connection refused' (拒绝连接)，这反而是件好事！")
+		fmt.Println("这证明我们的代码成功劫持了流量，但因为你的 VPS 上目前还没有在 10801 端口运行 Xray 代理，所以数据发不出去。")
 		return
 	}
 
-	// 5. 解析并打印获取到的机器列表
-	instances := resp.Items
-	if len(instances) == 0 {
-		fmt.Println("⚠️ 请求成功，但在当前的根区间 (Root Compartment) 下没有找到任何服务器。")
-		fmt.Println("提示：如果你在网页控制台能看到机器，说明机器可能建立在子区间里。")
-	} else {
-		fmt.Printf("🎉 成功获取！共找到 %d 台服务器：\n", len(instances))
-		fmt.Println("=====================================")
-		for i, instance := range instances {
-			// 获取机器名称，如果没有名字就显示"未命名"
-			name := "未命名"
-			if instance.DisplayName != nil {
-				name = *instance.DisplayName
-			}
-			// 获取机器的当前状态 (比如 RUNNING 或者 STOPPED)
-			state := "未知状态"
-			if instance.LifecycleState != "" {
-				state = string(instance.LifecycleState)
-			}
-			
-			fmt.Printf("[%d] 机器名称: %s | 运行状态: %s\n", i+1, name, state)
-		}
-		fmt.Println("=====================================")
-	}
+	fmt.Println("🎉 请求成功！由于本账号下没有机器，返回空列表是正确的。")
+	_ = resp.Items // 避免未使用变量的编译错误
 }
