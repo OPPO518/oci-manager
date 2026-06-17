@@ -52,7 +52,8 @@ func main() {
 	}
 
 	// 最关键的一步：拔掉 Oracle SDK 默认的网线，插上我们带有代理的网线
-	computeClient.HTTPClient = common.NewCustomHTTPRequestDispatcher(customHttpClient)
+	// 【已修复】直接赋值即可，Go 内置的 client 完全兼容
+	computeClient.HTTPClient = customHttpClient
 
 	// ==========================================
 
@@ -74,5 +75,5 @@ func main() {
 	}
 
 	fmt.Println("🎉 请求成功！由于本账号下没有机器，返回空列表是正确的。")
-	_ = resp.Items // 避免未使用变量的编译错误
+	_ = resp.Items
 }
