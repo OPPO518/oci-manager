@@ -140,7 +140,7 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "指令已下发！状态即将更新。"})
 }
 
-// 🚀 VNC 终极处理引擎 (包含握手重试机制)
+// 🚀 VNC 终极处理引擎 (完美支持 Oracle 双重 SSH 套娃架构)
 func vncHandler(w http.ResponseWriter, r *http.Request) {
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("account_id"))
 	instanceID := r.URL.Query().Get("instance_id")
@@ -161,7 +161,7 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username, host, err := parseConnectionString(*console.ConnectionString)
+	proxyUser, proxyHost, targetOCID, err := parseConnectionString(*console.ConnectionString)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 解析连接字符串失败: "+err.Error()+"\r\n"))
 		return
@@ -192,45 +192,72 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sshConfig := &ssh.ClientConfig{
-		User: username,
+	// 第一层跳板机配置
+	proxyConfig := &ssh.ClientConfig{
+		User: proxyUser,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), 
 	}
 
-	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 正在等待 Oracle 底层分配通道权限 (约需 5-15 秒，请耐心等待)...\r\n"))
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 正在等待 Oracle 底层跳板机分配权限 (约需 5-15 秒)...\r\n"))
 
 	var netConn net.Conn
-	var sshConn ssh.Conn
-	var chans <-chan ssh.NewChannel
-	var reqs <-chan *ssh.Request
+	var sshConn1 ssh.Conn
+	var chans1 <-chan ssh.NewChannel
+	var reqs1 <-chan *ssh.Request
 	var errConnect error
 
-	// 🚀 核心修复：加入重试机制，给 Oracle 15*2=30秒 的时间注入公钥
+	// 给跳板机反应时间，进行第一层重试握手
 	for i := 0; i < 15; i++ {
-		netConn, errConnect = dialer.Dial("tcp", fmt.Sprintf("%s:443", host))
+		netConn, errConnect = dialer.Dial("tcp", fmt.Sprintf("%s:443", proxyHost))
 		if errConnect == nil {
-			sshConn, chans, reqs, errConnect = ssh.NewClientConn(netConn, fmt.Sprintf("%s:443", host), sshConfig)
+			sshConn1, chans1, reqs1, errConnect = ssh.NewClientConn(netConn, fmt.Sprintf("%s:443", proxyHost), proxyConfig)
 			if errConnect == nil {
-				break // 握手成功！跳出等待循环
+				break // 第一层握手成功！
 			}
-			netConn.Close() // 握手失败，关掉网络通道准备下一次重试
+			netConn.Close() 
 		}
-		time.Sleep(2 * time.Second) // 睡 2 秒再敲门
+		time.Sleep(2 * time.Second)
 	}
 
 	if errConnect != nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 底层网络 SSH 握手超时失败: "+errConnect.Error()+"\r\n"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 第一层跳板机网络 SSH 握手超时失败: "+errConnect.Error()+"\r\n"))
 		return
 	}
 	defer netConn.Close()
 
-	client := ssh.NewClient(sshConn, chans, reqs)
-	defer client.Close()
+	proxyClient := ssh.NewClient(sshConn1, chans1, reqs1)
+	defer proxyClient.Close()
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 突破跳板机成功！正在建立第二层物理串口隧道...\r\n"))
 
-	session, err := client.NewSession()
+	// 🚀 神奇操作：在第一层 SSH 隧道内，再打通一条 TCP 隧道，通向机器底层的 22 端口
+	targetAddr := targetOCID + ":22"
+	forwardedNetConn, err := proxyClient.Dial("tcp", targetAddr)
 	if err != nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 打开底层串口会话通道失败: "+err.Error()+"\r\n"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 申请第二层串口隧道失败: "+err.Error()+"\r\n"))
+		return
+	}
+	defer forwardedNetConn.Close()
+
+	// 🚀 第二层串口配置：通过刚才打通的隧道，再次发起 SSH 握手！
+	targetConfig := &ssh.ClientConfig{
+		User: targetOCID, // 目标用户名就是机器的 OCID
+		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	sshConn2, chans2, reqs2, err := ssh.NewClientConn(forwardedNetConn, targetAddr, targetConfig)
+	if err != nil {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 第二层物理串口握手失败: "+err.Error()+"\r\n"))
+		return
+	}
+	targetClient := ssh.NewClient(sshConn2, chans2, reqs2)
+	defer targetClient.Close()
+
+	// 终于到了这一步：在第二层连接里打开 Session，这次绝对不会报 unknown channel type 了！
+	session, err := targetClient.NewSession()
+	if err != nil {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n[错误] 打开底层串口控制台失败: "+err.Error()+"\r\n"))
 		return
 	}
 	defer session.Close()
@@ -249,7 +276,7 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 安全通道已桥接！正在打通甲骨文物理机房串口控制台... <<<\r\n\r\n"))
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 🚀 物理机房串口通道全线贯通！请敲击 Enter 唤醒终端 <<<\r\n\r\n"))
 
 	go func() {
 		buf := make([]byte, 2048)
@@ -269,22 +296,30 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseConnectionString(connStr string) (username, host string, err error) {
+// 辅助工具函数：更强大的解析器，提取出 跳板机用户、跳板机地址、真实机器OCID 三个关键信息
+func parseConnectionString(connStr string) (proxyUser, proxyHost, targetOCID string, err error) {
+	connStr = strings.TrimSpace(connStr)
+	parts := strings.Split(connStr, " ")
+	if len(parts) == 0 {
+		return "", "", "", fmt.Errorf("连接串为空")
+	}
+	targetOCID = parts[len(parts)-1] // 最后一项永远是目标的 OCID
+
 	pIdx := strings.Index(connStr, "-p 443 ")
-	if pIdx == -1 { return "", "", fmt.Errorf("未匹配到标准端口 443 路由标记") }
+	if pIdx == -1 { return "", "", "", fmt.Errorf("未匹配到标准端口 443 路由标记") }
 	sub := connStr[pIdx+7:]
-	quoteIdx := strings.Index(sub, "\"")
+	quoteIdx := strings.Index(sub, "'")
 	if quoteIdx == -1 {
-		quoteIdx = strings.Index(sub, "'") 
-		if quoteIdx == -1 { return "", "", fmt.Errorf("连接串语法边界异常") }
+		quoteIdx = strings.Index(sub, "\"") 
+		if quoteIdx == -1 { return "", "", "", fmt.Errorf("连接串语法边界异常") }
 	}
 	targetBlock := sub[:quoteIdx] 
 
 	atIdx := strings.Index(targetBlock, "@")
-	if atIdx == -1 { return "", "", fmt.Errorf("未发现特权用户分界符") }
-	username = targetBlock[:atIdx]
-	host = targetBlock[atIdx+1:]
-	return username, host, nil
+	if atIdx == -1 { return "", "", "", fmt.Errorf("未发现特权用户分界符") }
+	proxyUser = targetBlock[:atIdx]
+	proxyHost = targetBlock[atIdx+1:]
+	return proxyUser, proxyHost, targetOCID, nil
 }
 
 // ================= 主函数启动区域 =================
