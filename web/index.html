@@ -3,66 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OCI Manager - 登录</title>
+    <title>OCI Manager - 中控台</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
-        /* 深度定制 Oracle Redwood 风格 */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #F9F9F9; color: #161514; }
-        .header { background-color: #312D2A; color: white; padding: 15px 30px; font-size: 20px; font-weight: bold; }
-        .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
-        .card { background: white; padding: 30px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid #C74634; }
+        .header { background-color: #312D2A; color: white; padding: 15px 30px; font-size: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .container { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .card { background: white; padding: 30px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid #C74634; margin-bottom: 20px; }
         
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #CCC; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        .form-group input:focus { outline: none; border-color: #C74634; box-shadow: 0 0 0 2px rgba(199,70,52,0.2); }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; color: #555; }
+        .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #CCC; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 13px; }
+        .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #C74634; }
+        .form-row { display: flex; gap: 15px; }
+        .form-row .form-group { flex: 1; }
         
-        button { background-color: #C74634; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background 0.2s; }
+        button { background-color: #C74634; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
         button:hover { background-color: #A33626; }
-        button:disabled { background-color: #E0E0E0; cursor: not-allowed; color: #888; }
+        button:disabled { background-color: #E0E0E0; cursor: not-allowed; }
+        button.btn-secondary { background-color: #312D2A; }
+        button.btn-secondary:hover { background-color: #161514; }
         
-        pre { background: #1E1E1E; color: #D4D4D4; padding: 15px; border-radius: 4px; overflow-x: auto; font-family: monospace; }
+        .account-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border: 1px solid #EEE; border-radius: 4px; margin-bottom: 10px; background: #FAFAFA; }
+        .account-info h4 { margin: 0 0 5px 0; color: #C74634; }
+        .account-info p { margin: 0; font-size: 12px; color: #666; }
+        
+        pre { background: #1E1E1E; color: #D4D4D4; padding: 15px; border-radius: 4px; overflow-x: auto; font-family: monospace; font-size: 13px;}
         .error-msg { color: #C74634; margin-top: 10px; font-size: 14px; }
-        .logout-btn { float: right; background: transparent; border: 1px solid white; padding: 6px 12px; border-radius: 4px; color: white; cursor: pointer; font-size: 12px;}
-        .logout-btn:hover { background: rgba(255,255,255,0.1); }
+        .success-msg { color: #2E7D32; margin-top: 10px; font-size: 14px; }
+        .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav-tabs button { background: transparent; color: #333; border: 1px solid #CCC; }
+        .nav-tabs button.active { background: #C74634; color: white; border-color: #C74634; }
     </style>
 </head>
 <body>
     <div id="app">
         <div class="header">
-            Oracle Cloud 运维中控
-            <button v-if="isLoggedIn" @click="logout" class="logout-btn">退出登录</button>
+            <span>Oracle Cloud 中控矩阵</span>
+            <button v-if="isLoggedIn" @click="logout" style="padding: 5px 10px; font-size: 12px;">退出登录</button>
         </div>
 
         <div class="container">
             <div v-if="!isLoggedIn" class="card" style="max-width: 400px; margin: 60px auto;">
                 <h2 style="margin-top:0;">系统登录</h2>
-                <div class="form-group">
-                    <label>用户名</label>
-                    <input type="text" v-model="loginForm.username" placeholder="请输入用户名">
-                </div>
-                <div class="form-group">
-                    <label>密 码</label>
-                    <input type="password" v-model="loginForm.password" placeholder="请输入密码">
-                </div>
-                <button style="width:100%" @click="doLogin" :disabled="loading">
-                    {{ loading ? '正在验证...' : '登 录' }}
-                </button>
+                <div class="form-group"><label>用户名</label><input type="text" v-model="loginForm.username"></div>
+                <div class="form-group"><label>密 码</label><input type="password" v-model="loginForm.password"></div>
+                <button style="width:100%" @click="doLogin" :disabled="loading">{{ loading ? '验证中...' : '登 录' }}</button>
                 <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
             </div>
 
-            <div v-else class="card">
-                <h3>实例管理面板</h3>
-                <p>安全通道：代理端口 10801 已就绪</p>
-                <button @click="fetchInstances" :disabled="loading">
-                    {{ loading ? '正在拉取...' : '获取服务器列表' }}
-                </button>
-                
-                <div v-if="errorMsg" class="error-msg" style="margin-top: 20px;">{{ errorMsg }}</div>
-                
-                <div v-if="result !== null" style="margin-top: 20px;">
-                    <h4 style="margin-bottom: 10px;">控制台返回：</h4>
-                    <pre>{{ result }}</pre>
+            <div v-else>
+                <div class="nav-tabs">
+                    <button :class="{active: currentTab === 'list'}" @click="switchTab('list')">我的账号列表</button>
+                    <button :class="{active: currentTab === 'add'}" @click="switchTab('add')">录入新账号</button>
+                </div>
+
+                <div v-if="currentTab === 'list'" class="card">
+                    <h3 style="margin-top:0;">已托管的 OCI 账号</h3>
+                    <div v-if="accounts.length === 0" style="color: #666; font-size: 14px;">保险箱空空如也，请先录入账号。</div>
+                    
+                    <div class="account-item" v-for="acc in accounts" :key="acc.id">
+                        <div class="account-info">
+                            <h4>{{ acc.name }}</h4>
+                            <p>代理通道: {{ acc.proxy_url }}</p>
+                        </div>
+                        <button @click="fetchInstances(acc.id)" :disabled="loading" class="btn-secondary">
+                            查询实例
+                        </button>
+                    </div>
+
+                    <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+                    
+                    <div v-if="result !== null" style="margin-top: 20px; border-top: 1px solid #EEE; padding-top: 20px;">
+                        <h4 style="margin-top:0;">Oracle 返回结果：</h4>
+                        <pre>{{ result }}</pre>
+                    </div>
+                </div>
+
+                <div v-if="currentTab === 'add'" class="card">
+                    <h3 style="margin-top:0;">新增安全托管</h3>
+                    <div class="form-row">
+                        <div class="form-group"><label>备注名称 (如: 春川主号)</label><input type="text" v-model="newAccount.name"></div>
+                        <div class="form-group"><label>专属代理 (如: socks5://127.0.0.1:10801)</label><input type="text" v-model="newAccount.proxy_url"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Tenancy OCID</label><input type="text" v-model="newAccount.tenancy"></div>
+                        <div class="form-group"><label>User OCID</label><input type="text" v-model="newAccount.user"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Region (如: ap-seoul-1)</label><input type="text" v-model="newAccount.region"></div>
+                        <div class="form-group"><label>Fingerprint</label><input type="text" v-model="newAccount.fingerprint"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Private Key (完整粘贴 .pem 内容)</label>
+                        <textarea v-model="newAccount.private_key" rows="6" placeholder="-----BEGIN PRIVATE KEY-----..."></textarea>
+                    </div>
+                    <button @click="submitNewAccount" :disabled="loading">
+                        {{ loading ? '加密入库中...' : '安全保存凭证' }}
+                    </button>
+                    <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+                    <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
                 </div>
             </div>
         </div>
@@ -75,74 +115,84 @@
                 const isLoggedIn = ref(false);
                 const loading = ref(false);
                 const errorMsg = ref('');
+                const successMsg = ref('');
                 const result = ref(null);
+                const currentTab = ref('list');
+                const accounts = ref([]);
+                
                 const loginForm = ref({ username: '', password: '' });
+                const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
 
-                // 页面一加载，看看本地有没有 Token
-                onMounted(() => {
-                    const token = localStorage.getItem('oci_token');
-                    if (token) isLoggedIn.value = true;
+                const getAuthHeaders = () => ({
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('oci_token')
                 });
 
-                const doLogin = async () => {
-                    loading.value = true;
-                    errorMsg.value = '';
-                    try {
-                        const response = await fetch('/api/login', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(loginForm.value)
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok) {
-                            // 登录成功，把令牌存到浏览器里
-                            localStorage.setItem('oci_token', data.token);
-                            isLoggedIn.value = true;
-                        } else {
-                            errorMsg.value = data.error;
-                        }
-                    } catch (error) {
-                        errorMsg.value = "网络错误，无法连接到服务器";
-                    } finally {
-                        loading.value = false;
+                const checkAuthError = (status) => {
+                    if (status === 401) { logout(); return true; }
+                    return false;
+                };
+
+                onMounted(() => {
+                    if (localStorage.getItem('oci_token')) {
+                        isLoggedIn.value = true;
+                        loadAccounts();
                     }
-                };
+                });
 
-                const fetchInstances = async () => {
-                    loading.value = true;
-                    errorMsg.value = '';
+                const doLogin = async () => { /* 登录逻辑简化以节省版面，和之前一样 */
+                    loading.value = true; errorMsg.value = '';
                     try {
-                        const token = localStorage.getItem('oci_token');
-                        const response = await fetch('/api/instances', {
-                            headers: { 'Authorization': 'Bearer ' + token }
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok) {
-                            result.value = JSON.stringify(data, null, 2);
-                        } else {
-                            // 如果服务器说未登录，就把本地 Token 清理掉，退回登录页
-                            if (response.status === 401) {
-                                logout();
-                            }
-                            errorMsg.value = data.error;
-                        }
-                    } catch (error) {
-                        errorMsg.value = "请求出错：" + error;
-                    } finally {
-                        loading.value = false;
-                    }
+                        const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(loginForm.value) });
+                        const data = await res.json();
+                        if (res.ok) { localStorage.setItem('oci_token', data.token); isLoggedIn.value = true; loadAccounts(); } 
+                        else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
                 };
 
-                const logout = () => {
-                    localStorage.removeItem('oci_token');
-                    isLoggedIn.value = false;
-                    result.value = null;
-                    loginForm.value.password = '';
+                const logout = () => { localStorage.removeItem('oci_token'); isLoggedIn.value = false; result.value = null; };
+
+                const switchTab = (tab) => {
+                    currentTab.value = tab;
+                    errorMsg.value = ''; successMsg.value = ''; result.value = null;
+                    if (tab === 'list') loadAccounts();
                 };
 
-                return { isLoggedIn, loading, errorMsg, result, loginForm, doLogin, fetchInstances, logout };
+                const loadAccounts = async () => {
+                    try {
+                        const res = await fetch('/api/accounts/list', { headers: getAuthHeaders() });
+                        if (checkAuthError(res.status)) return;
+                        const data = await res.json();
+                        if (res.ok) accounts.value = data.accounts || [];
+                    } catch (e) { console.error(e); }
+                };
+
+                const submitNewAccount = async () => {
+                    loading.value = true; errorMsg.value = ''; successMsg.value = '';
+                    try {
+                        const res = await fetch('/api/accounts/add', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(newAccount.value) });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) {
+                            successMsg.value = "凭证已通过 AES 加密并存入安全数据库！";
+                            // 清空表单
+                            newAccount.value = { name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' };
+                        } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
+                };
+
+                const fetchInstances = async (id) => {
+                    loading.value = true; errorMsg.value = ''; result.value = null;
+                    try {
+                        const res = await fetch('/api/instances?id=' + id, { headers: getAuthHeaders() });
+                        if (checkAuthError(res.status)) return;
+                        const data = await res.json();
+                        if (res.ok) { result.value = JSON.stringify(data, null, 2); } 
+                        else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "请求出错：" + e; } finally { loading.value = false; }
+                };
+
+                return { isLoggedIn, loading, errorMsg, successMsg, result, currentTab, accounts, loginForm, newAccount, doLogin, logout, switchTab, submitNewAccount, fetchInstances };
             }
         }).mount('#app');
     </script>
