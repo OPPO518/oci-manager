@@ -61,6 +61,13 @@
         .vnc-box { width: 90%; max-width: 900px; height: 80vh; background: #000; padding: 20px; border-radius: 6px; border: 1px solid #333; display: flex; flex-direction: column; }
         .vnc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: #FFF; border-bottom: 1px solid #222; padding-bottom: 10px; flex-shrink: 0; }
         #terminal-container { width: 100%; flex-grow: 1; background: #000; overflow: hidden; position: relative; }
+
+        /* 🚀 新增代理解析结果面板样式 */
+        .proxy-result-box { background: #312D2A; color: #4CAF50; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 13px; margin-top: 15px; word-wrap: break-word; }
+        .proxy-result-title { color: #FFF; margin-bottom: 10px; border-bottom: 1px solid #555; padding-bottom: 5px; font-weight: bold; }
+        .proxy-item { display: flex; margin-bottom: 5px; }
+        .proxy-item-key { color: #FF9800; width: 100px; flex-shrink: 0; }
+        .proxy-item-val { color: #E0E0E0; }
     </style>
 </head>
 <body>
@@ -83,6 +90,7 @@
                 <div class="nav-tabs">
                     <button :class="{active: currentTab === 'list'}" @click="switchTab('list')">我的账号列表</button>
                     <button :class="{active: currentTab === 'add'}" @click="switchTab('add')">录入新账号</button>
+                    <button :class="{active: currentTab === 'proxy'}" @click="switchTab('proxy')">🔌 代理自动化工厂</button>
                 </div>
 
                 <div v-if="currentTab === 'list'" class="card">
@@ -99,8 +107,6 @@
                             <button @click="deleteAccount(acc.id, acc.name)" :disabled="loading" class="btn-stop btn-small">删除</button>
                         </div>
                     </div>
-                    <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
-                    <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
                     
                     <div v-if="instances !== null" style="margin-top: 20px; border-top: 1px solid #EEE; padding-top: 20px;">
                         <h4 style="margin-top:0; color: #333; line-height: 32px;">
@@ -147,7 +153,7 @@
                     <div class="form-group"><label>API配置快速导入 (请粘贴 Oracle Cloud API 配置文件内容)</label><textarea v-model="rawConfigText" rows="6"></textarea></div>
                     <div class="form-row">
                         <div class="form-group"><label>UserName (备注名称)</label><input type="text" v-model="newAccount.name"></div>
-                        <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url"></div>
+                        <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url" placeholder="如: socks5://127.0.0.1:10801"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group"><label>User (API user)</label><input type="text" v-model="newAccount.user"></div>
@@ -169,6 +175,37 @@
                     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
                     <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
                 </div>
+
+                <div v-if="currentTab === 'proxy'" class="card">
+                    <h3 style="margin-top:0; margin-bottom: 20px;">Xray / V2ray 智能节点解析引擎</h3>
+                    <div class="form-group">
+                        <label>粘贴分享链接 (支持 VLESS / VMess / Trojan / Shadowsocks)</label>
+                        <textarea v-model="proxyLinkInput" rows="4" placeholder="例如: vless://uuid@1.2.3.4:443?encryption=none&security=reality&sni=..."></textarea>
+                    </div>
+                    <button @click="parseProxyLink" style="background-color: #2E7D32;">🧠 极速解析节点</button>
+                    
+                    <div v-if="proxyParseError" class="error-msg">{{ proxyParseError }}</div>
+                    
+                    <div v-if="parsedProxy" class="proxy-result-box">
+                        <div class="proxy-result-title">解析成功 - 节点档案：{{ parsedProxy.name }}</div>
+                        <div class="proxy-item"><span class="proxy-item-key">底层协议:</span><span class="proxy-item-val">{{ parsedProxy.protocol.toUpperCase() }}</span></div>
+                        <div class="proxy-item"><span class="proxy-item-key">节点地址:</span><span class="proxy-item-val">{{ parsedProxy.host }} : {{ parsedProxy.port }}</span></div>
+                        <div class="proxy-item" v-if="parsedProxy.id"><span class="proxy-item-key">UUID:</span><span class="proxy-item-val">{{ parsedProxy.id }}</span></div>
+                        <div class="proxy-item" v-if="parsedProxy.password"><span class="proxy-item-key">Password:</span><span class="proxy-item-val">{{ parsedProxy.password }}</span></div>
+                        <div class="proxy-item"><span class="proxy-item-key">传输网络:</span><span class="proxy-item-val">{{ parsedProxy.network }}</span></div>
+                        <div class="proxy-item"><span class="proxy-item-key">安全传输:</span><span class="proxy-item-val">{{ parsedProxy.security }}</span></div>
+                        
+                        <div v-for="(val, key) in parsedProxy.raw" :key="key" class="proxy-item">
+                            <span class="proxy-item-key">{{ key }}:</span><span class="proxy-item-val">{{ val }}</span>
+                        </div>
+                        
+                        <div style="margin-top: 15px; border-top: 1px dashed #555; padding-top: 15px;">
+                            <span style="color: #FF9800; font-size: 12px; margin-bottom: 10px; display: block;">即将开放的功能预告：</span>
+                            <button disabled class="btn-secondary">⚙️ 为该节点生成本地 Xray SOCKS5 通道 (开发中)</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -187,16 +224,20 @@
         const { createApp, ref, onMounted, watch, nextTick } = Vue;
         createApp({
             setup() {
-                const isLoggedIn = ref(false); const loading = ref(false); const actionLoading = ref(false); 
-                const isSyncing = ref(false);
+                const isLoggedIn = ref(false); const loading = ref(false); const actionLoading = ref(false); const isSyncing = ref(false);
                 const errorMsg = ref(''); const successMsg = ref(''); const instances = ref(null); const currentTab = ref('list');
                 const accounts = ref([]); const loginForm = ref({ username: '', password: '' });
                 const rawConfigText = ref(''); const keyLoaded = ref(false);
-                const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
+                const newAccount = ref({ name: '', proxy_url: '', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
                 const currentAccountID = ref(null); 
 
                 const vncActive = ref(false); const vncTargetName = ref('');
                 let socket = null; let term = null; let fitAddon = null;
+
+                // 🚀 代理自动化工厂所需的响应式变量
+                const proxyLinkInput = ref('');
+                const parsedProxy = ref(null);
+                const proxyParseError = ref('');
 
                 watch(rawConfigText, (newText) => {
                     const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
@@ -223,36 +264,23 @@
                     window.addEventListener('resize', () => { if (term && fitAddon && vncActive.value) { try{ fitAddon.fit(); }catch(e){} } });
                 });
 
-                // 🚀 彻底修复：还原完整的登录逻辑，绝不再用注释折叠
                 const doLogin = async () => {
-                    if (!loginForm.value.username || !loginForm.value.password) {
-                        errorMsg.value = "请输入用户名和密码";
-                        return;
-                    }
+                    if (!loginForm.value.username || !loginForm.value.password) { errorMsg.value = "请输入用户名和密码"; return; }
                     loading.value = true; errorMsg.value = '';
                     try {
-                        const res = await fetch('/api/login', { 
-                            method: 'POST', 
-                            headers: {'Content-Type': 'application/json'}, 
-                            body: JSON.stringify(loginForm.value) 
-                        });
+                        const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(loginForm.value) });
                         const data = await res.json();
-                        if (res.ok) { 
-                            localStorage.setItem('oci_token', data.token); 
-                            isLoggedIn.value = true; 
-                            loadAccounts(); 
-                        } else { 
-                            errorMsg.value = data.error; 
-                        }
-                    } catch (e) { 
-                        errorMsg.value = "网络错误，请检查服务端是否运行"; 
-                    } finally { 
-                        loading.value = false; 
-                    }
+                        if (res.ok) { localStorage.setItem('oci_token', data.token); isLoggedIn.value = true; loadAccounts(); } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "网络错误，请检查服务端是否运行"; } finally { loading.value = false; }
                 };
 
                 const logout = () => { localStorage.removeItem('oci_token'); isLoggedIn.value = false; instances.value = null; };
-                const switchTab = (tab) => { currentTab.value = tab; errorMsg.value = ''; successMsg.value = ''; instances.value = null; if(tab === 'list') loadAccounts(); };
+                
+                const switchTab = (tab) => { 
+                    currentTab.value = tab; errorMsg.value = ''; successMsg.value = ''; 
+                    proxyParseError.value = ''; // 切换标签时清理报错
+                    if(tab === 'list') loadAccounts(); 
+                };
                 
                 const loadAccounts = async () => {
                     try {
@@ -262,16 +290,42 @@
                     } catch (e) { console.error(e); }
                 };
 
+                const submitNewAccount = async () => {
+                    loading.value = true; errorMsg.value = ''; successMsg.value = '';
+                    try {
+                        const res = await fetch('/api/accounts/add', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(newAccount.value) });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) {
+                            successMsg.value = "账号录入成功！";
+                            newAccount.value = { name: '', proxy_url: '', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' };
+                            rawConfigText.value = ''; keyLoaded.value = false;
+                        } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
+                };
+
+                const deleteAccount = async (id, name) => {
+                    if(!confirm(`⚠️ 危险操作：确定要彻底抹除账号 [${name}] 的凭证吗？`)) return;
+                    loading.value = true; errorMsg.value = ''; successMsg.value = '';
+                    try {
+                        const res = await fetch('/api/accounts/delete', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: id }) });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) { 
+                            successMsg.value = data.message;
+                            if (currentAccountID.value === id) { instances.value = null; currentAccountID.value = null; }
+                            loadAccounts(); 
+                        } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "删除请求失败：" + e; } finally { loading.value = false; }
+                };
+
                 const loadCache = async (id) => {
                     errorMsg.value = ''; successMsg.value = ''; instances.value = null;
                     try {
                         const res = await fetch('/api/instances/cache?id=' + id, { headers: getAuthHeaders() });
                         if (checkAuthError(res.status)) return;
                         const data = await res.json();
-                        if (res.ok) { 
-                            instances.value = data.instances || []; 
-                            currentAccountID.value = id; 
-                        } else { errorMsg.value = data.error; }
+                        if (res.ok) { instances.value = data.instances || []; currentAccountID.value = id; } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "快照读取失败：" + e; }
                 };
 
@@ -303,7 +357,6 @@
                     } catch (e) { errorMsg.value = "请求失败：" + e; } finally { actionLoading.value = false; }
                 };
 
-                // 🚀 彻底还原：完整的双向 VNC 终端连接逻辑
                 const openVNCTerminal = (instanceId, displayName) => {
                     vncTargetName.value = displayName;
                     vncActive.value = true;
@@ -315,7 +368,6 @@
                         
                         const container = document.getElementById('terminal-container');
                         term.open(container);
-                        
                         setTimeout(() => { fitAddon.fit(); }, 50);
 
                         const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -326,15 +378,9 @@
                                 const reader = new FileReader();
                                 reader.onload = () => term.write(new Uint8Array(reader.result));
                                 reader.readAsArrayBuffer(event.data);
-                            } else {
-                                term.write(event.data);
-                            }
+                            } else { term.write(event.data); }
                         };
-
-                        term.onData((data) => {
-                            if (socket && socket.readyState === WebSocket.OPEN) { socket.send(data); }
-                        });
-
+                        term.onData((data) => { if (socket && socket.readyState === WebSocket.OPEN) { socket.send(data); } });
                         socket.onclose = () => term.write('\r\n[系统通知] 安全控制台长连接已正常安全挂断。\r\n');
                         socket.onerror = () => term.write('\r\n[系统错误] 代理中转网络通道握手崩溃。\r\n');
                     });
@@ -346,10 +392,83 @@
                     vncActive.value = false;
                 };
 
+                // 🚀 核心大招：强大的全协议智能解析引擎
+                const parseProxyLink = () => {
+                    proxyParseError.value = '';
+                    parsedProxy.value = null;
+                    let link = proxyLinkInput.value.trim();
+                    if (!link) { proxyParseError.value = "请输入代理节点分享链接"; return; }
+
+                    try {
+                        if (link.startsWith('vmess://')) {
+                            // 针对历史包袱最重的 VMess 进行 Base64 + JSON 解码
+                            let b64 = link.substring(8);
+                            // 解决 JS atob 对中文字符解码可能报错的补丁
+                            let jsonStr = decodeURIComponent(escape(window.atob(b64)));
+                            let json = JSON.parse(jsonStr);
+                            
+                            parsedProxy.value = {
+                                protocol: 'vmess',
+                                name: json.ps || '未命名节点',
+                                host: json.add,
+                                port: json.port,
+                                id: json.id,
+                                network: json.net || 'tcp',
+                                security: json.tls === 'tls' ? 'tls' : 'none',
+                                raw: {
+                                    '伪装域名(host)': json.host || '无',
+                                    '路径(path)': json.path || '无',
+                                    '伪装类型(type)': json.type || 'none'
+                                }
+                            };
+                        } else {
+                            // 针对极其规范的 VLESS, Trojan, Shadowsocks URI 格式
+                            let url = new URL(link);
+                            let protocol = url.protocol.replace(':', '').toLowerCase();
+                            
+                            let proxyObj = {
+                                protocol: protocol,
+                                name: decodeURIComponent(url.hash.substring(1)) || '未命名节点',
+                                host: url.hostname,
+                                port: url.port,
+                                network: url.searchParams.get('type') || 'tcp',
+                                security: url.searchParams.get('security') || 'none',
+                                raw: {}
+                            };
+
+                            // 把所有的扩展参数 (如 sni, pbk, flow, sid) 全部提取出来
+                            url.searchParams.forEach((val, key) => { 
+                                if(key !== 'type' && key !== 'security') {
+                                    proxyObj.raw[key] = val; 
+                                }
+                            });
+
+                            if (protocol === 'vless') {
+                                proxyObj.id = url.username; // VLESS 将 UUID 藏在 username 里
+                            } else if (protocol === 'trojan') {
+                                proxyObj.password = url.username; // Trojan 将密码藏在 username 里
+                            } else if (protocol === 'ss') {
+                                // SS 特殊处理：老旧的 SIP002 标准将加密方式和密码以 Base64 藏在用户名里
+                                let decoded = decodeURIComponent(escape(window.atob(url.username)));
+                                let parts = decoded.split(':');
+                                proxyObj.raw['加密方式(method)'] = parts[0];
+                                proxyObj.password = parts[1] || '无';
+                            } else {
+                                throw new Error("尚未支持的协议标识符：" + protocol);
+                            }
+                            
+                            parsedProxy.value = proxyObj;
+                        }
+                    } catch (e) {
+                        proxyParseError.value = "解析彻底失败: " + e.message + " (请检查您粘贴的链接是否被截断或存在格式错误)";
+                    }
+                };
+
                 return { 
                     isLoggedIn, loading, actionLoading, isSyncing, errorMsg, successMsg, instances, currentTab, accounts, 
                     loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID, vncActive, vncTargetName,
-                    doLogin, logout, switchTab, loadAccounts, loadCache, syncCloud, sendAction, openVNCTerminal, closeVNCTerminal
+                    proxyLinkInput, parsedProxy, proxyParseError, // 将解析引擎暴露给 Vue
+                    doLogin, logout, switchTab, loadAccounts, submitNewAccount, deleteAccount, loadCache, syncCloud, sendAction, openVNCTerminal, closeVNCTerminal, parseProxyLink
                 };
             }
         }).mount('#app');
