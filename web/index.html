@@ -56,11 +56,22 @@
         .nav-tabs button { background: transparent; color: #333; border: 1px solid #CCC; }
         .nav-tabs button.active { background: #C74634; color: white; border-color: #C74634; }
 
-        /* VNC 全屏黑色高平遮罩面板 */
+        /* 🚀 核心 CSS 修复：VNC 全屏遮罩与高度锁定 */
         .vnc-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 9999; }
-        .vnc-box { width: 90%; max-width: 900px; background: #000; padding: 20px; border-radius: 6px; border: 1px solid #333; }
-        .vnc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: #FFF; border-bottom: 1px solid #222; padding-bottom: 10px; }
-        #terminal-container { width: 100%; background: #000; padding: 10px; box-sizing: border-box; }
+        .vnc-box { 
+            width: 90%; max-width: 900px; 
+            height: 80vh; /* 强制高度为屏幕的 80% */
+            background: #000; padding: 20px; border-radius: 6px; border: 1px solid #333; 
+            display: flex; flex-direction: column; /* 让内部采用纵向弹性布局 */
+        }
+        .vnc-header { 
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: #FFF; border-bottom: 1px solid #222; padding-bottom: 10px; 
+            flex-shrink: 0; /* 绝对不允许头部标题栏被压缩 */
+        }
+        #terminal-container { 
+            width: 100%; flex-grow: 1; /* 撑满剩余的所有高度 */
+            background: #000; overflow: hidden; position: relative; 
+        }
     </style>
 </head>
 <body>
@@ -98,9 +109,7 @@
                             <button @click="fetchInstances(acc.id)" :disabled="loading" class="btn-secondary btn-small">
                                 {{ loadingAccount === acc.id ? '雷达扫描中...' : '查询实例' }}
                             </button>
-                            <button @click="deleteAccount(acc.id, acc.name)" :disabled="loading" class="btn-stop btn-small">
-                                删除
-                            </button>
+                            <button @click="deleteAccount(acc.id, acc.name)" :disabled="loading" class="btn-stop btn-small">删除</button>
                         </div>
                     </div>
                     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
@@ -140,10 +149,7 @@
 
                 <div v-if="currentTab === 'add'" class="card">
                     <h3 style="margin-top:0; margin-bottom: 20px;">新增安全托管</h3>
-                    <div class="form-group">
-                        <label>API配置快速导入 (请粘贴 Oracle Cloud API 配置文件内容)</label>
-                        <textarea v-model="rawConfigText" rows="6"></textarea>
-                    </div>
+                    <div class="form-group"><label>API配置快速导入 (请粘贴 Oracle Cloud API 配置文件内容)</label><textarea v-model="rawConfigText" rows="6"></textarea></div>
                     <div class="form-row">
                         <div class="form-group"><label>UserName (备注名称)</label><input type="text" v-model="newAccount.name"></div>
                         <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url"></div>
@@ -171,7 +177,7 @@
             </div>
         </div>
 
-        <div v-if="vncActive" class="vnc-modal">
+        <div v-if="vncActive" class="vnc-modal" @click.self="closeVNCTerminal">
             <div class="vnc-box">
                 <div class="vnc-header">
                     <span>独立安全串口控制台: {{ vncTargetName }}</span>
@@ -193,11 +199,11 @@
                 const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
                 const currentAccountID = ref(null); 
 
-                // VNC 独占视窗状态
                 const vncActive = ref(false);
                 const vncTargetName = ref('');
                 let socket = null;
                 let term = null;
+                let fitAddon = null;
 
                 watch(rawConfigText, (newText) => {
                     const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
@@ -219,17 +225,21 @@
                 const checkAuthError = (status) => { if (status === 401) { logout(); return true; } return false; };
 
                 onMounted(() => { 
-                    if (localStorage.getItem('oci_token')) { 
-                        isLoggedIn.value = true; 
-                        loadAccounts(); 
-                    } 
-
-                    // 🚀 新增：防脱落保险丝。放在 onMounted 里是更优雅的 Vue 规范
+                    if (localStorage.getItem('oci_token')) { isLoggedIn.value = true; loadAccounts(); } 
+                    
+                    // 防脱落保险丝
                     window.addEventListener('beforeunload', () => {
                         if (socket) { socket.close(); }
                     });
+
+                    // 监听浏览器窗口变化，让终端跟随缩放
+                    window.addEventListener('resize', () => {
+                        if (term && fitAddon && vncActive.value) {
+                            try { fitAddon.fit(); } catch(e){}
+                        }
+                    });
                 });
-                
+
                 const doLogin = async () => {
                     loading.value = true; errorMsg.value = '';
                     try {
@@ -309,27 +319,24 @@
                     } catch (e) { errorMsg.value = "操作请求失败：" + e; } finally { actionLoading.value = false; }
                 };
 
-                // 🚀 核心新增：纯原生打通 Web 与后端 SSH 管道握手
                 const openVNCTerminal = (instanceId, displayName) => {
                     vncTargetName.value = displayName;
                     vncActive.value = true;
 
-                    // 必须在 DOM 节点被渲染后（弹窗打开后）才能挂载终端画布
                     nextTick(() => {
-                        term = new Terminal({
-                            cursorBlink: true,
-                            theme: { background: '#000000', foreground: '#FFFFFF' }
-                        });
-                        const fitAddon = new FitAddon.FitAddon();
+                        term = new Terminal({ cursorBlink: true, theme: { background: '#000000', foreground: '#FFFFFF' }});
+                        fitAddon = new FitAddon.FitAddon();
                         term.loadAddon(fitAddon);
-                        term.open(document.getElementById('terminal-container'));
-                        fitAddon.fit();
+                        
+                        const container = document.getElementById('terminal-container');
+                        term.open(container);
+                        
+                        // 强制延迟执行适应高度，确保 DOM 已完全渲染计算
+                        setTimeout(() => { fitAddon.fit(); }, 50);
 
-                        // 构建长连接管道
                         const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
                         socket = new WebSocket(`${protocol}${location.host}/api/vnc?account_id=${currentAccountID.value}&instance_id=${instanceId}`);
                         
-                        // 管道流入：接收后端传递过来的主板画面，绘制到黑色终端上
                         socket.onmessage = (event) => {
                             if (event.data instanceof Blob) {
                                 const reader = new FileReader();
@@ -340,11 +347,8 @@
                             }
                         };
 
-                        // 管道流出：捕捉用户在控制台上的物理键盘按下动作，实时灌入后端
                         term.onData((data) => {
-                            if (socket && socket.readyState === WebSocket.OPEN) {
-                                socket.send(data);
-                            }
+                            if (socket && socket.readyState === WebSocket.OPEN) { socket.send(data); }
                         });
 
                         socket.onclose = () => term.write('\r\n[系统通知] 安全控制台长连接已正常安全挂断。\r\n');
@@ -354,7 +358,7 @@
 
                 const closeVNCTerminal = () => {
                     if (socket) { socket.close(); socket = null; }
-                    if (term) { term.dispose(); term = null; }
+                    if (term) { term.dispose(); term = null; fitAddon = null; }
                     vncActive.value = false;
                 };
 
