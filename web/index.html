@@ -30,6 +30,7 @@
         button.btn-start { background-color: #2E7D32; } button.btn-start:hover { background-color: #1B5E20; }
         button.btn-stop { background-color: #D32F2F; } button.btn-stop:hover { background-color: #B71C1C; }
         button.btn-reboot { background-color: #F57C00; } button.btn-reboot:hover { background-color: #E65100; }
+        button.btn-vnc { background-color: #161514; border: 1px solid #555; } button.btn-vnc:hover { background-color: #000; }
 
         .file-upload-box { border: 2px dashed #CCC; padding: 20px; text-align: center; border-radius: 4px; cursor: pointer; background: #FAFAFA; transition: border-color 0.3s; margin-bottom: 15px;}
         .file-upload-box:hover { border-color: #C74634; }
@@ -54,6 +55,12 @@
         .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav-tabs button { background: transparent; color: #333; border: 1px solid #CCC; }
         .nav-tabs button.active { background: #C74634; color: white; border-color: #C74634; }
+
+        /* VNC 全屏黑色高平遮罩面板 */
+        .vnc-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+        .vnc-box { width: 90%; max-width: 900px; background: #000; padding: 20px; border-radius: 6px; border: 1px solid #333; }
+        .vnc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: #FFF; border-bottom: 1px solid #222; padding-bottom: 10px; }
+        #terminal-container { width: 100%; background: #000; padding: 10px; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -110,7 +117,7 @@
                                     <th>大区 (Region)</th>
                                     <th>运行状态</th>
                                     <th>系统架构</th>
-                                    <th>电源操作</th>
+                                    <th>高级电源/底层串口控制</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -123,6 +130,7 @@
                                         <button v-if="inst.lifecycleState === 'STOPPED'" @click="sendAction(inst.id, 'START')" class="btn-small btn-start" :disabled="actionLoading">启动</button>
                                         <button v-if="inst.lifecycleState === 'RUNNING'" @click="sendAction(inst.id, 'REBOOT')" class="btn-small btn-reboot" :disabled="actionLoading">重启</button>
                                         <button v-if="inst.lifecycleState === 'RUNNING'" @click="sendAction(inst.id, 'STOP')" class="btn-small btn-stop" :disabled="actionLoading">关机</button>
+                                        <button @click="openVNCTerminal(inst.id, inst.displayName)" class="btn-small btn-vnc">VNC 救砖</button>
                                     </td>
                                 </tr>
                             </tbody>
@@ -162,10 +170,20 @@
                 </div>
             </div>
         </div>
+
+        <div v-if="vncActive" class="vnc-modal">
+            <div class="vnc-box">
+                <div class="vnc-header">
+                    <span>独立安全串口控制台: {{ vncTargetName }}</span>
+                    <button @click="closeVNCTerminal" class="btn-stop btn-small">断开 VNC</button>
+                </div>
+                <div id="terminal-container"></div>
+            </div>
+        </div>
     </div>
 
     <script>
-        const { createApp, ref, onMounted, watch } = Vue;
+        const { createApp, ref, onMounted, watch, nextTick } = Vue;
         createApp({
             setup() {
                 const isLoggedIn = ref(false); const loading = ref(false); const actionLoading = ref(false); const loadingAccount = ref(null);
@@ -174,6 +192,12 @@
                 const rawConfigText = ref(''); const keyLoaded = ref(false);
                 const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
                 const currentAccountID = ref(null); 
+
+                // VNC 独占视窗状态
+                const vncActive = ref(false);
+                const vncTargetName = ref('');
+                let socket = null;
+                let term = null;
 
                 watch(rawConfigText, (newText) => {
                     const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
@@ -196,7 +220,7 @@
 
                 onMounted(() => { if (localStorage.getItem('oci_token')) { isLoggedIn.value = true; loadAccounts(); } });
 
-                const doLogin = async () => { /* 登录逻辑保持不变 */
+                const doLogin = async () => {
                     loading.value = true; errorMsg.value = '';
                     try {
                         const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(loginForm.value) });
@@ -235,26 +259,17 @@
                     } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
                 };
 
-                // 🚀 新增：彻底删除账号逻辑
                 const deleteAccount = async (id, name) => {
                     if(!confirm(`⚠️ 危险操作：确定要彻底抹除账号 [${name}] 的凭证吗？此操作不可逆转！`)) return;
-                    
                     loading.value = true; errorMsg.value = ''; successMsg.value = '';
                     try {
-                        const res = await fetch('/api/accounts/delete', { 
-                            method: 'POST', 
-                            headers: getAuthHeaders(),
-                            body: JSON.stringify({ id: id })
-                        });
+                        const res = await fetch('/api/accounts/delete', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: id }) });
                         const data = await res.json();
                         if (checkAuthError(res.status)) return;
                         if (res.ok) { 
                             successMsg.value = data.message;
-                            if (currentAccountID.value === id) {
-                                instances.value = null; // 如果删的是当前正在看的账号，把机器列表清空
-                                currentAccountID.value = null;
-                            }
-                            loadAccounts(); // 重新拉取列表
+                            if (currentAccountID.value === id) { instances.value = null; currentAccountID.value = null; }
+                            loadAccounts(); 
                         } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "删除请求失败：" + e; } finally { loading.value = false; }
                 };
@@ -274,10 +289,7 @@
                     if(!confirm(`确定要对该机器执行 [${action}] 操作吗？`)) return;
                     actionLoading.value = true; errorMsg.value = ''; successMsg.value = '';
                     try {
-                        const res = await fetch('/api/instances/action', { 
-                            method: 'POST', headers: getAuthHeaders(),
-                            body: JSON.stringify({ account_id: currentAccountID.value, instance_id: instanceId, action: action })
-                        });
+                        const res = await fetch('/api/instances/action', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ account_id: currentAccountID.value, instance_id: instanceId, action: action }) });
                         const data = await res.json();
                         if (checkAuthError(res.status)) return;
                         if (res.ok) { 
@@ -287,10 +299,59 @@
                     } catch (e) { errorMsg.value = "操作请求失败：" + e; } finally { actionLoading.value = false; }
                 };
 
+                // 🚀 核心新增：纯原生打通 Web 与后端 SSH 管道握手
+                const openVNCTerminal = (instanceId, displayName) => {
+                    vncTargetName.value = displayName;
+                    vncActive.value = true;
+
+                    // 必须在 DOM 节点被渲染后（弹窗打开后）才能挂载终端画布
+                    nextTick(() => {
+                        term = new Terminal({
+                            cursorBlink: true,
+                            theme: { background: '#000000', foreground: '#FFFFFF' }
+                        });
+                        const fitAddon = new FitAddon.FitAddon();
+                        term.loadAddon(fitAddon);
+                        term.open(document.getElementById('terminal-container'));
+                        fitAddon.fit();
+
+                        // 构建长连接管道
+                        const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+                        socket = new WebSocket(`${protocol}${location.host}/api/vnc?account_id=${currentAccountID.value}&instance_id=${instanceId}`);
+                        
+                        // 管道流入：接收后端传递过来的主板画面，绘制到黑色终端上
+                        socket.onmessage = (event) => {
+                            if (event.data instanceof Blob) {
+                                const reader = new FileReader();
+                                reader.onload = () => term.write(new Uint8Array(reader.result));
+                                reader.readAsArrayBuffer(event.data);
+                            } else {
+                                term.write(event.data);
+                            }
+                        };
+
+                        // 管道流出：捕捉用户在控制台上的物理键盘按下动作，实时灌入后端
+                        term.onData((data) => {
+                            if (socket && socket.readyState === WebSocket.OPEN) {
+                                socket.send(data);
+                            }
+                        });
+
+                        socket.onclose = () => term.write('\r\n[系统通知] 安全控制台长连接已正常安全挂断。\r\n');
+                        socket.onerror = () => term.write('\r\n[系统错误] 代理中转网络通道握手崩溃。\r\n');
+                    });
+                };
+
+                const closeVNCTerminal = () => {
+                    if (socket) { socket.close(); socket = null; }
+                    if (term) { term.dispose(); term = null; }
+                    vncActive.value = false;
+                };
+
                 return { 
                     isLoggedIn, loading, actionLoading, loadingAccount, errorMsg, successMsg, instances, currentTab, accounts, 
-                    loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID,
-                    doLogin, logout, switchTab, submitNewAccount, deleteAccount, fetchInstances, handleFileUpload, sendAction 
+                    loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID, vncActive, vncTargetName,
+                    doLogin, logout, switchTab, submitNewAccount, deleteAccount, fetchInstances, handleFileUpload, sendAction, openVNCTerminal, closeVNCTerminal
                 };
             }
         }).mount('#app');
