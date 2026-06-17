@@ -218,8 +218,18 @@
                 const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('oci_token') });
                 const checkAuthError = (status) => { if (status === 401) { logout(); return true; } return false; };
 
-                onMounted(() => { if (localStorage.getItem('oci_token')) { isLoggedIn.value = true; loadAccounts(); } });
+                onMounted(() => { 
+                    if (localStorage.getItem('oci_token')) { 
+                        isLoggedIn.value = true; 
+                        loadAccounts(); 
+                    } 
 
+                    // 🚀 新增：防脱落保险丝。放在 onMounted 里是更优雅的 Vue 规范
+                    window.addEventListener('beforeunload', () => {
+                        if (socket) { socket.close(); }
+                    });
+                });
+                
                 const doLogin = async () => {
                     loading.value = true; errorMsg.value = '';
                     try {
