@@ -23,7 +23,7 @@
         button:disabled { background-color: #E0E0E0; cursor: not-allowed; }
         button.btn-secondary { background-color: #312D2A; }
         button.btn-secondary:hover { background-color: #161514; }
-        button.btn-small { padding: 5px 10px; font-size: 12px; margin-right: 5px; }
+        button.btn-small { padding: 6px 12px; font-size: 12px; margin-left: 5px; }
         button.btn-start { background-color: #2E7D32; } button.btn-start:hover { background-color: #1B5E20; }
         button.btn-stop { background-color: #D32F2F; } button.btn-stop:hover { background-color: #B71C1C; }
         button.btn-reboot { background-color: #F57C00; } button.btn-reboot:hover { background-color: #E65100; }
@@ -38,7 +38,6 @@
         .account-info h4 { margin: 0 0 5px 0; color: #C74634; }
         .account-info p { margin: 0; font-size: 12px; color: #666; }
         
-        /* 全新表格样式 */
         table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #EEE; }
         th { background-color: #FAFAFA; font-weight: bold; color: #555; }
@@ -85,9 +84,14 @@
                             <h4>{{ acc.name }}</h4>
                             <p>代理通道: {{ acc.proxy_url }}</p>
                         </div>
-                        <button @click="fetchInstances(acc.id)" :disabled="loading" class="btn-secondary">
-                            {{ loadingAccount === acc.id ? '雷达扫描中...' : '查询实例' }}
-                        </button>
+                        <div>
+                            <button @click="fetchInstances(acc.id)" :disabled="loading" class="btn-secondary btn-small">
+                                {{ loadingAccount === acc.id ? '雷达扫描中...' : '查询实例' }}
+                            </button>
+                            <button @click="deleteAccount(acc.id, acc.name)" :disabled="loading" class="btn-stop btn-small">
+                                删除
+                            </button>
+                        </div>
                     </div>
                     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
                     <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
@@ -110,11 +114,7 @@
                                 <tr v-for="inst in instances" :key="inst.id">
                                     <td style="font-weight: bold;">{{ inst.displayName }}</td>
                                     <td>{{ inst.region }}</td>
-                                    <td>
-                                        <span :class="['status-badge', 'status-' + inst.lifecycleState]">
-                                            {{ inst.lifecycleState }}
-                                        </span>
-                                    </td>
+                                    <td><span :class="['status-badge', 'status-' + inst.lifecycleState]">{{ inst.lifecycleState }}</span></td>
                                     <td style="color: #666;">{{ inst.shape }}</td>
                                     <td>
                                         <button v-if="inst.lifecycleState === 'STOPPED'" @click="sendAction(inst.id, 'START')" class="btn-small btn-start" :disabled="actionLoading">启动</button>
@@ -170,8 +170,6 @@
                 const accounts = ref([]); const loginForm = ref({ username: '', password: '' });
                 const rawConfigText = ref(''); const keyLoaded = ref(false);
                 const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
-                
-                // 记录当前正在查看哪个账号的机器，方便发电源指令
                 const currentAccountID = ref(null); 
 
                 watch(rawConfigText, (newText) => {
@@ -195,7 +193,7 @@
 
                 onMounted(() => { if (localStorage.getItem('oci_token')) { isLoggedIn.value = true; loadAccounts(); } });
 
-                const doLogin = async () => {
+                const doLogin = async () => { /* 登录逻辑保持不变 */
                     loading.value = true; errorMsg.value = '';
                     try {
                         const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(loginForm.value) });
@@ -234,36 +232,53 @@
                     } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
                 };
 
+                // 🚀 新增：彻底删除账号逻辑
+                const deleteAccount = async (id, name) => {
+                    if(!confirm(`⚠️ 危险操作：确定要彻底抹除账号 [${name}] 的凭证吗？此操作不可逆转！`)) return;
+                    
+                    loading.value = true; errorMsg.value = ''; successMsg.value = '';
+                    try {
+                        const res = await fetch('/api/accounts/delete', { 
+                            method: 'POST', 
+                            headers: getAuthHeaders(),
+                            body: JSON.stringify({ id: id })
+                        });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) { 
+                            successMsg.value = data.message;
+                            if (currentAccountID.value === id) {
+                                instances.value = null; // 如果删的是当前正在看的账号，把机器列表清空
+                                currentAccountID.value = null;
+                            }
+                            loadAccounts(); // 重新拉取列表
+                        } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "删除请求失败：" + e; } finally { loading.value = false; }
+                };
+
                 const fetchInstances = async (id) => {
                     loading.value = true; loadingAccount.value = id; errorMsg.value = ''; successMsg.value = ''; instances.value = null;
                     try {
                         const res = await fetch('/api/instances?id=' + id, { headers: getAuthHeaders() });
                         if (checkAuthError(res.status)) return;
                         const data = await res.json();
-                        if (res.ok) { 
-                            instances.value = data.instances || []; 
-                            currentAccountID.value = id; // 记住当前是在操作哪个账号的机器
-                        } 
+                        if (res.ok) { instances.value = data.instances || []; currentAccountID.value = id; } 
                         else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "请求出错：" + e; } finally { loading.value = false; loadingAccount.value = null; }
                 };
 
-                // 🚀 新增：发送电源操作指令
                 const sendAction = async (instanceId, action) => {
                     if(!confirm(`确定要对该机器执行 [${action}] 操作吗？`)) return;
-                    
                     actionLoading.value = true; errorMsg.value = ''; successMsg.value = '';
                     try {
                         const res = await fetch('/api/instances/action', { 
-                            method: 'POST', 
-                            headers: getAuthHeaders(),
+                            method: 'POST', headers: getAuthHeaders(),
                             body: JSON.stringify({ account_id: currentAccountID.value, instance_id: instanceId, action: action })
                         });
                         const data = await res.json();
                         if (checkAuthError(res.status)) return;
                         if (res.ok) { 
                             successMsg.value = data.message; 
-                            // 延时 3 秒后自动刷新一下机器列表，看看状态变了没
                             setTimeout(() => fetchInstances(currentAccountID.value), 3000);
                         } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "操作请求失败：" + e; } finally { actionLoading.value = false; }
@@ -272,7 +287,7 @@
                 return { 
                     isLoggedIn, loading, actionLoading, loadingAccount, errorMsg, successMsg, instances, currentTab, accounts, 
                     loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID,
-                    doLogin, logout, switchTab, submitNewAccount, fetchInstances, handleFileUpload, sendAction 
+                    doLogin, logout, switchTab, submitNewAccount, deleteAccount, fetchInstances, handleFileUpload, sendAction 
                 };
             }
         }).mount('#app');
