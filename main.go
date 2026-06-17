@@ -46,7 +46,6 @@ func addAccountHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
 	
-	// 【已修复】删除了多余的 var req 声明
 	var body struct {
 		Name     string `json:"name"`
 		ProxyURL string `json:"proxy_url"`
@@ -74,6 +73,22 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"accounts": accounts})
 }
 
+// 🚀 新增：账号删除接口
+func deleteAccountHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if !checkAuth(w, r) { return }
+
+	var req struct { ID int `json:"id"` }
+	json.NewDecoder(r.Body).Decode(&req)
+
+	if err := service.DeleteAccount(req.ID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "删除失败: " + err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"message": "账号记录已安全销毁"})
+}
+
 func getInstancesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
@@ -88,7 +103,6 @@ func getInstancesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"instances": instances})
 }
 
-// 🚀 新增：电源控制拦截接口
 func actionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
@@ -102,12 +116,9 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 
 	var ociAction core.InstanceActionActionEnum
 	switch req.Action {
-	case "START":
-		ociAction = core.InstanceActionActionStart
-	case "STOP":
-		ociAction = core.InstanceActionActionSoftstop // 优雅关机
-	case "REBOOT":
-		ociAction = core.InstanceActionActionSoftreset // 优雅重启
+	case "START": ociAction = core.InstanceActionActionStart
+	case "STOP": ociAction = core.InstanceActionActionSoftstop
+	case "REBOOT": ociAction = core.InstanceActionActionSoftreset
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "未知的电源指令"})
@@ -134,6 +145,7 @@ func main() {
 	http.HandleFunc("/api/login", loginHandler)
 	http.HandleFunc("/api/accounts/add", addAccountHandler)
 	http.HandleFunc("/api/accounts/list", listAccountsHandler)
+	http.HandleFunc("/api/accounts/delete", deleteAccountHandler) // 挂载删除路由
 	http.HandleFunc("/api/instances", getInstancesHandler)
 	http.HandleFunc("/api/instances/action", actionHandler) 
 	
