@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCI Manager</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f4f5f7; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
+        button { background-color: #c74634; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #a33626; }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div id="app" class="card">
+        <h2>Oracle Cloud 多账号中控</h2>
+        <p>当前测试账号状态：代理通道 10801 已就绪</p>
+        <button @click="fetchInstances" :disabled="loading">
+            {{ loading ? '正在通过代理请求 OCI...' : '获取服务器列表' }}
+        </button>
+        
+        <div v-if="result !== null" style="margin-top: 20px;">
+            <h3>请求结果：</h3>
+            <pre>{{ result }}</pre>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref } = Vue;
+        createApp({
+            setup() {
+                const loading = ref(false);
+                const result = ref(null);
+
+                const fetchInstances = async () => {
+                    loading.value = true;
+                    try {
+                        // 去呼叫我们 Go 后端提供的 API 接口
+                        const response = await fetch('/api/instances');
+                        const data = await response.json();
+                        result.value = JSON.stringify(data, null, 2);
+                    } catch (error) {
+                        result.value = "请求出错：" + error;
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+                return { loading, result, fetchInstances };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
