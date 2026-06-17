@@ -6,13 +6,11 @@
     <title>OCI Manager - 中控台</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
-        /* 保持 Oracle Redwood 风格 */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #F9F9F9; color: #161514; }
         .header { background-color: #312D2A; color: white; padding: 15px 30px; font-size: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
-        .container { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .container { max-width: 1000px; margin: 30px auto; padding: 0 20px; }
         .card { background: white; padding: 30px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid #C74634; margin-bottom: 20px; }
         
-        /* 表单样式 */
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; color: #555; }
         .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #CCC; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 13px; background-color: #FAFAFA;}
@@ -20,12 +18,15 @@
         .form-row { display: flex; gap: 15px; }
         .form-row .form-group { flex: 1; }
         
-        /* 按钮与文件上传区域 */
         button { background-color: #C74634; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
         button:hover { background-color: #A33626; }
         button:disabled { background-color: #E0E0E0; cursor: not-allowed; }
         button.btn-secondary { background-color: #312D2A; }
         button.btn-secondary:hover { background-color: #161514; }
+        button.btn-small { padding: 5px 10px; font-size: 12px; margin-right: 5px; }
+        button.btn-start { background-color: #2E7D32; } button.btn-start:hover { background-color: #1B5E20; }
+        button.btn-stop { background-color: #D32F2F; } button.btn-stop:hover { background-color: #B71C1C; }
+        button.btn-reboot { background-color: #F57C00; } button.btn-reboot:hover { background-color: #E65100; }
 
         .file-upload-box { border: 2px dashed #CCC; padding: 20px; text-align: center; border-radius: 4px; cursor: pointer; background: #FAFAFA; transition: border-color 0.3s; margin-bottom: 15px;}
         .file-upload-box:hover { border-color: #C74634; }
@@ -33,11 +34,19 @@
         .file-upload-label { color: #C74634; font-weight: bold; cursor: pointer; }
         .file-success { color: #2E7D32; font-size: 13px; margin-top: 5px; }
         
-        /* 列表与其他 */
         .account-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border: 1px solid #EEE; border-radius: 4px; margin-bottom: 10px; background: #FAFAFA; }
         .account-info h4 { margin: 0 0 5px 0; color: #C74634; }
         .account-info p { margin: 0; font-size: 12px; color: #666; }
-        pre { background: #1E1E1E; color: #D4D4D4; padding: 15px; border-radius: 4px; overflow-x: auto; font-family: monospace; font-size: 13px;}
+        
+        /* 全新表格样式 */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #EEE; }
+        th { background-color: #FAFAFA; font-weight: bold; color: #555; }
+        .status-badge { padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 11px; }
+        .status-RUNNING { background-color: #E8F5E9; color: #2E7D32; }
+        .status-STOPPED { background-color: #FFEBEE; color: #C62828; }
+        .status-PROVISIONING { background-color: #FFF3E0; color: #EF6C00; }
+        
         .error-msg { color: #C74634; margin-top: 10px; font-size: 14px; }
         .success-msg { color: #2E7D32; margin-top: 10px; font-size: 14px; }
         .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -77,31 +86,57 @@
                             <p>代理通道: {{ acc.proxy_url }}</p>
                         </div>
                         <button @click="fetchInstances(acc.id)" :disabled="loading" class="btn-secondary">
-                            查询实例
+                            {{ loadingAccount === acc.id ? '雷达扫描中...' : '查询实例' }}
                         </button>
                     </div>
-
                     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+                    <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
                     
-                    <div v-if="result !== null" style="margin-top: 20px; border-top: 1px solid #EEE; padding-top: 20px;">
-                        <h4 style="margin-top:0;">Oracle 返回结果：</h4>
-                        <pre>{{ result }}</pre>
+                    <div v-if="instances !== null" style="margin-top: 20px; border-top: 1px solid #EEE; padding-top: 20px;">
+                        <h4 style="margin-top:0; color: #333;">实例管理面板 (共 {{ instances.length }} 台机器)</h4>
+                        <div v-if="instances.length === 0" style="color: #666; font-size: 13px;">雷达已扫遍所有区间，未发现存活的机器。</div>
+                        
+                        <table v-else>
+                            <thead>
+                                <tr>
+                                    <th>实例名称</th>
+                                    <th>大区 (Region)</th>
+                                    <th>运行状态</th>
+                                    <th>系统架构</th>
+                                    <th>电源操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="inst in instances" :key="inst.id">
+                                    <td style="font-weight: bold;">{{ inst.displayName }}</td>
+                                    <td>{{ inst.region }}</td>
+                                    <td>
+                                        <span :class="['status-badge', 'status-' + inst.lifecycleState]">
+                                            {{ inst.lifecycleState }}
+                                        </span>
+                                    </td>
+                                    <td style="color: #666;">{{ inst.shape }}</td>
+                                    <td>
+                                        <button v-if="inst.lifecycleState === 'STOPPED'" @click="sendAction(inst.id, 'START')" class="btn-small btn-start" :disabled="actionLoading">启动</button>
+                                        <button v-if="inst.lifecycleState === 'RUNNING'" @click="sendAction(inst.id, 'REBOOT')" class="btn-small btn-reboot" :disabled="actionLoading">重启</button>
+                                        <button v-if="inst.lifecycleState === 'RUNNING'" @click="sendAction(inst.id, 'STOP')" class="btn-small btn-stop" :disabled="actionLoading">关机</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
                 <div v-if="currentTab === 'add'" class="card">
                     <h3 style="margin-top:0; margin-bottom: 20px;">新增安全托管</h3>
-                    
                     <div class="form-group">
                         <label>API配置快速导入 (请粘贴 Oracle Cloud API 配置文件内容)</label>
-                        <textarea v-model="rawConfigText" rows="6" placeholder="[DEFAULT]&#10;user=ocid1.user.oc1..example&#10;fingerprint=xx:xx:xx:xx&#10;tenancy=ocid1.tenancy.oc1..example&#10;region=us-phoenix-1"></textarea>
+                        <textarea v-model="rawConfigText" rows="6"></textarea>
                     </div>
-
                     <div class="form-row">
-                        <div class="form-group"><label>UserName (备注名称)</label><input type="text" v-model="newAccount.name" placeholder="例如: 春川主号"></div>
-                        <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url" placeholder="例如: socks5://127.0.0.1:10801"></div>
+                        <div class="form-group"><label>UserName (备注名称)</label><input type="text" v-model="newAccount.name"></div>
+                        <div class="form-group"><label>Proxy (专属代理通道)</label><input type="text" v-model="newAccount.proxy_url"></div>
                     </div>
-
                     <div class="form-row">
                         <div class="form-group"><label>User (API user)</label><input type="text" v-model="newAccount.user"></div>
                         <div class="form-group"><label>Fingerprint</label><input type="text" v-model="newAccount.fingerprint"></div>
@@ -110,20 +145,15 @@
                         <div class="form-group"><label>Tenancy (API tenancy)</label><input type="text" v-model="newAccount.tenancy"></div>
                         <div class="form-group"><label>Region</label><input type="text" v-model="newAccount.region"></div>
                     </div>
-
                     <div class="form-group">
                         <label>密钥文件 (上传 .pem 私钥文件自动读取)</label>
                         <label class="file-upload-box" style="display: block;">
                             <input type="file" @change="handleFileUpload" accept=".pem,.txt">
                             <span class="file-upload-label">📁 点击选择文件或拖拽文件到此处</span>
-                            <div v-if="keyLoaded" class="file-success">✔️ 私钥文件读取成功，已装载进内存待加密</div>
+                            <div v-if="keyLoaded" class="file-success">✔️ 私钥文件读取成功</div>
                         </label>
                     </div>
-
-                    <button @click="submitNewAccount" :disabled="loading || !newAccount.private_key">
-                        {{ loading ? '加密入库中...' : '安全保存凭证' }}
-                    </button>
-                    
+                    <button @click="submitNewAccount" :disabled="loading || !newAccount.private_key">安全保存凭证</button>
                     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
                     <div v-if="successMsg" class="success-msg">{{ successMsg }}</div>
                 </div>
@@ -135,68 +165,35 @@
         const { createApp, ref, onMounted, watch } = Vue;
         createApp({
             setup() {
-                const isLoggedIn = ref(false);
-                const loading = ref(false);
-                const errorMsg = ref('');
-                const successMsg = ref('');
-                const result = ref(null);
-                const currentTab = ref('list');
-                const accounts = ref([]);
-                
-                const loginForm = ref({ username: '', password: '' });
-                const rawConfigText = ref('');
-                const keyLoaded = ref(false);
+                const isLoggedIn = ref(false); const loading = ref(false); const actionLoading = ref(false); const loadingAccount = ref(null);
+                const errorMsg = ref(''); const successMsg = ref(''); const instances = ref(null); const currentTab = ref('list');
+                const accounts = ref([]); const loginForm = ref({ username: '', password: '' });
+                const rawConfigText = ref(''); const keyLoaded = ref(false);
                 const newAccount = ref({ name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' });
+                
+                // 记录当前正在查看哪个账号的机器，方便发电源指令
+                const currentAccountID = ref(null); 
 
-                // =============== 核心新增：自动解析监听器 ===============
-                // 监听 rawConfigText 的变化，一旦用户粘贴，立刻用正则提取参数
                 watch(rawConfigText, (newText) => {
-                    const extract = (key) => {
-                        const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`));
-                        return match ? match[1].trim() : '';
-                    };
-                    
+                    const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
                     if(extract('user')) newAccount.value.user = extract('user');
                     if(extract('fingerprint')) newAccount.value.fingerprint = extract('fingerprint');
                     if(extract('tenancy')) newAccount.value.tenancy = extract('tenancy');
                     if(extract('region')) newAccount.value.region = extract('region');
                 });
 
-                // =============== 核心新增：私钥文件读取逻辑 ===============
                 const handleFileUpload = (event) => {
-                    const file = event.target.files[0];
-                    if (!file) return;
-                    
+                    const file = event.target.files[0]; if (!file) return;
                     const reader = new FileReader();
-                    reader.onload = (e) => {
-                        newAccount.value.private_key = e.target.result;
-                        keyLoaded.value = true;
-                        errorMsg.value = '';
-                    };
-                    reader.onerror = () => {
-                        errorMsg.value = '文件读取失败，请检查文件权限';
-                        keyLoaded.value = false;
-                    }
+                    reader.onload = (e) => { newAccount.value.private_key = e.target.result; keyLoaded.value = true; errorMsg.value = ''; };
+                    reader.onerror = () => { errorMsg.value = '文件读取失败'; keyLoaded.value = false; }
                     reader.readAsText(file);
                 };
 
-                // 以下是原有通信与状态逻辑
-                const getAuthHeaders = () => ({
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + localStorage.getItem('oci_token')
-                });
+                const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('oci_token') });
+                const checkAuthError = (status) => { if (status === 401) { logout(); return true; } return false; };
 
-                const checkAuthError = (status) => {
-                    if (status === 401) { logout(); return true; }
-                    return false;
-                };
-
-                onMounted(() => {
-                    if (localStorage.getItem('oci_token')) {
-                        isLoggedIn.value = true;
-                        loadAccounts();
-                    }
-                });
+                onMounted(() => { if (localStorage.getItem('oci_token')) { isLoggedIn.value = true; loadAccounts(); } });
 
                 const doLogin = async () => {
                     loading.value = true; errorMsg.value = '';
@@ -208,11 +205,10 @@
                     } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
                 };
 
-                const logout = () => { localStorage.removeItem('oci_token'); isLoggedIn.value = false; result.value = null; };
+                const logout = () => { localStorage.removeItem('oci_token'); isLoggedIn.value = false; instances.value = null; };
 
                 const switchTab = (tab) => {
-                    currentTab.value = tab;
-                    errorMsg.value = ''; successMsg.value = ''; result.value = null;
+                    currentTab.value = tab; errorMsg.value = ''; successMsg.value = ''; instances.value = null;
                     if (tab === 'list') loadAccounts();
                 };
 
@@ -220,45 +216,63 @@
                     try {
                         const res = await fetch('/api/accounts/list', { headers: getAuthHeaders() });
                         if (checkAuthError(res.status)) return;
-                        const data = await res.json();
-                        if (res.ok) accounts.value = data.accounts || [];
+                        if (res.ok) { const data = await res.json(); accounts.value = data.accounts || []; }
                     } catch (e) { console.error(e); }
                 };
 
                 const submitNewAccount = async () => {
-                    if (!newAccount.value.private_key) {
-                        errorMsg.value = "请先上传私钥文件"; return;
-                    }
                     loading.value = true; errorMsg.value = ''; successMsg.value = '';
                     try {
                         const res = await fetch('/api/accounts/add', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(newAccount.value) });
                         const data = await res.json();
                         if (checkAuthError(res.status)) return;
                         if (res.ok) {
-                            successMsg.value = "凭证已通过 AES 加密并存入安全数据库！";
-                            // 提交成功后重置表单状态
+                            successMsg.value = "账号录入成功！";
                             newAccount.value = { name: '', proxy_url: 'socks5://127.0.0.1:10801', tenancy: '', user: '', region: '', fingerprint: '', private_key: '' };
-                            rawConfigText.value = '';
-                            keyLoaded.value = false;
+                            rawConfigText.value = ''; keyLoaded.value = false;
                         } else { errorMsg.value = data.error; }
                     } catch (e) { errorMsg.value = "网络错误"; } finally { loading.value = false; }
                 };
 
                 const fetchInstances = async (id) => {
-                    loading.value = true; errorMsg.value = ''; result.value = null;
+                    loading.value = true; loadingAccount.value = id; errorMsg.value = ''; successMsg.value = ''; instances.value = null;
                     try {
                         const res = await fetch('/api/instances?id=' + id, { headers: getAuthHeaders() });
                         if (checkAuthError(res.status)) return;
                         const data = await res.json();
-                        if (res.ok) { result.value = JSON.stringify(data, null, 2); } 
+                        if (res.ok) { 
+                            instances.value = data.instances || []; 
+                            currentAccountID.value = id; // 记住当前是在操作哪个账号的机器
+                        } 
                         else { errorMsg.value = data.error; }
-                    } catch (e) { errorMsg.value = "请求出错：" + e; } finally { loading.value = false; }
+                    } catch (e) { errorMsg.value = "请求出错：" + e; } finally { loading.value = false; loadingAccount.value = null; }
+                };
+
+                // 🚀 新增：发送电源操作指令
+                const sendAction = async (instanceId, action) => {
+                    if(!confirm(`确定要对该机器执行 [${action}] 操作吗？`)) return;
+                    
+                    actionLoading.value = true; errorMsg.value = ''; successMsg.value = '';
+                    try {
+                        const res = await fetch('/api/instances/action', { 
+                            method: 'POST', 
+                            headers: getAuthHeaders(),
+                            body: JSON.stringify({ account_id: currentAccountID.value, instance_id: instanceId, action: action })
+                        });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) { 
+                            successMsg.value = data.message; 
+                            // 延时 3 秒后自动刷新一下机器列表，看看状态变了没
+                            setTimeout(() => fetchInstances(currentAccountID.value), 3000);
+                        } else { errorMsg.value = data.error; }
+                    } catch (e) { errorMsg.value = "操作请求失败：" + e; } finally { actionLoading.value = false; }
                 };
 
                 return { 
-                    isLoggedIn, loading, errorMsg, successMsg, result, currentTab, accounts, 
-                    loginForm, newAccount, rawConfigText, keyLoaded,
-                    doLogin, logout, switchTab, submitNewAccount, fetchInstances, handleFileUpload 
+                    isLoggedIn, loading, actionLoading, loadingAccount, errorMsg, successMsg, instances, currentTab, accounts, 
+                    loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID,
+                    doLogin, logout, switchTab, submitNewAccount, fetchInstances, handleFileUpload, sendAction 
                 };
             }
         }).mount('#app');
