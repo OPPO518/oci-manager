@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"oci-manager/service"
+	"github.com/oracle/oci-go-sdk/v65/core"
 )
 
 // ================= 安全拦截器 =================
-// 所有的敏感接口在执行前，都会先过这一关，检查 Token
 func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -26,22 +26,12 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 
 // ================= API 接口区域 =================
 
-// 1. 登录接口 (保持不变)
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if r.Method != http.MethodPost {
-		http.Error(w, `{"error": "只允许 POST 请求"}`, http.StatusMethodNotAllowed)
-		return
-	}
+	if r.Method != http.MethodPost { return }
 
-	var reqBody struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, `{"error": "数据格式错误"}`, http.StatusBadRequest)
-		return
-	}
+	var reqBody struct { Username, Password string }
+	json.NewDecoder(r.Body).Decode(&reqBody)
 
 	token, err := service.VerifyLogin(reqBody.Username, reqBody.Password)
 	if err != nil {
@@ -49,47 +39,28 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
-
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "登录成功", "token": token})
 }
 
-// 2. 录入新账号接口
 func addAccountHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
 	
-	var req struct {
-		Name        string `json:"name"`
-		ProxyURL    string `json:"proxy_url"`
-		Tenancy     string `json:"tenancy"`
-		User        string `json:"user"`
-		Region      string `json:"region"`
-		Fingerprint string `json:"fingerprint"`
-		PrivateKey  string `json:"private_key"`
+	var req service.OCICredentials
+	var body struct {
+		Name, ProxyURL string
+		service.OCICredentials
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "数据格式错误"})
-		return
-	}
+	json.NewDecoder(r.Body).Decode(&body)
 
-	creds := service.OCICredentials{
-		Tenancy:     req.Tenancy,
-		User:        req.User,
-		Region:      req.Region,
-		Fingerprint: req.Fingerprint,
-		PrivateKey:  req.PrivateKey,
-	}
-
-	if err := service.AddAccount(req.Name, req.ProxyURL, creds); err != nil {
+	if err := service.AddAccount(body.Name, body.ProxyURL, body.OCICredentials); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "保存账号失败: " + err.Error()})
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "账号添加成功"})
 }
 
-// 3. 获取已有账号列表接口
 func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
@@ -97,33 +68,58 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	accounts, err := service.ListAccounts()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "获取列表失败: " + err.Error()})
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"accounts": accounts})
 }
 
-// 4. 按账号 ID 获取服务器列表 (动态连机核心)
 func getInstancesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
 
-	// 从 URL 参数里提取想查的账号 ID (比如 /api/instances?id=1)
-	accountIDStr := r.URL.Query().Get("id")
-	accountID, err := strconv.Atoi(accountIDStr)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "无效的账号 ID"})
-		return
-	}
-
+	accountID, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	instances, err := service.GetInstances(accountID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"message": "请求成功", "instances": instances})
+	json.NewEncoder(w).Encode(map[string]interface{}{"instances": instances})
+}
+
+// 🚀 新增：电源控制拦截接口
+func actionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if !checkAuth(w, r) { return }
+
+	var req struct {
+		AccountID  int    `json:"account_id"`
+		InstanceID string `json:"instance_id"`
+		Action     string `json:"action"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	var ociAction core.InstanceActionActionEnum
+	switch req.Action {
+	case "START":
+		ociAction = core.InstanceActionActionStart
+	case "STOP":
+		ociAction = core.InstanceActionActionSoftstop // 优雅关机
+	case "REBOOT":
+		ociAction = core.InstanceActionActionSoftreset // 优雅重启
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "未知的电源指令"})
+		return
+	}
+
+	err := service.InstanceAction(req.AccountID, req.InstanceID, ociAction)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "指令发送失败: " + err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"message": "指令已下发！状态即将更新。"})
 }
 
 // ================= 主函数启动区域 =================
@@ -138,11 +134,10 @@ func main() {
 	http.HandleFunc("/api/accounts/add", addAccountHandler)
 	http.HandleFunc("/api/accounts/list", listAccountsHandler)
 	http.HandleFunc("/api/instances", getInstancesHandler)
+	http.HandleFunc("/api/instances/action", actionHandler) // 挂载电源路由
 	
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
 	fmt.Println("🚀 核心服务已成功启动！请访问: http://您的VPS公网IP:8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Println("❌ 服务器启动遭遇致命错误:", err)
-	}
+	http.ListenAndServe(":8080", nil)
 }
