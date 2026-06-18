@@ -34,13 +34,11 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// ================= API 接口区域 =================
+// ================= 基础 API 接口区域 =================
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if r.Method != http.MethodPost {
-		return
-	}
+	if r.Method != http.MethodPost { return }
 
 	var reqBody struct { Username, Password string }
 	_ = json.NewDecoder(r.Body).Decode(&reqBody)
@@ -56,9 +54,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 func addAccountHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 	
 	var body struct {
 		Name     string `json:"name"`
@@ -77,9 +73,7 @@ func addAccountHandler(w http.ResponseWriter, r *http.Request) {
 
 func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 
 	accounts, err := service.ListAccounts()
 	if err != nil {
@@ -91,9 +85,7 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 
 func deleteAccountHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 
 	var req struct { ID int `json:"id"` }
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -106,12 +98,11 @@ func deleteAccountHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "账号记录已安全销毁"})
 }
 
-// 🚀 新增：读取本地数据库缓存快照（0 延迟）
+// ================= OCI 实例与缓存 API =================
+
 func getCacheHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	instances, err := service.GetCachedInstances(accountID)
@@ -123,12 +114,9 @@ func getCacheHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"instances": instances})
 }
 
-// 🚀 新增：强制同步甲骨文云端（并触发写缓存）
 func syncInstancesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	instances, err := service.SyncInstances(accountID)
@@ -142,9 +130,7 @@ func syncInstancesHandler(w http.ResponseWriter, r *http.Request) {
 
 func actionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if !checkAuth(w, r) {
-		return
-	}
+	if !checkAuth(w, r) { return }
 
 	var req struct {
 		AccountID  int    `json:"account_id"`
@@ -155,12 +141,9 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 
 	var ociAction core.InstanceActionActionEnum
 	switch req.Action {
-	case "START":
-		ociAction = core.InstanceActionActionStart
-	case "STOP":
-		ociAction = core.InstanceActionActionSoftstop
-	case "REBOOT":
-		ociAction = core.InstanceActionActionSoftreset
+	case "START": ociAction = core.InstanceActionActionStart
+	case "STOP": ociAction = core.InstanceActionActionSoftstop
+	case "REBOOT": ociAction = core.InstanceActionActionSoftreset
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "未知的电源指令"})
@@ -176,15 +159,37 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "指令已下发！状态即将更新。"})
 }
 
-// ================= VNC 终极处理引擎 (包含双重 SSH 隧道套娃) =================
+// 🚀 新增：Xray 代理工厂核心唤醒 API
+func startProxyHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if !checkAuth(w, r) { return }
+
+	var req service.ProxyConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "解析节点档案参数失败"})
+		return
+	}
+
+	proxyURL, err := service.StartXrayProcess(req)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"proxy_url": proxyURL, 
+		"message": "底层 Xray 通道已打通！",
+	})
+}
+
+// ================= VNC 双重隧道引擎 (保持不变) =================
 func vncHandler(w http.ResponseWriter, r *http.Request) {
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("account_id"))
 	instanceID := r.URL.Query().Get("instance_id")
 
 	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer conn.Close()
 
 	console, privKeyStr, err := service.CreateVNCConnection(accountID, instanceID)
@@ -230,7 +235,6 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 第一层跳板机配置
 	proxyConfig := &ssh.ClientConfig{
 		User:            proxyUser,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
@@ -245,14 +249,11 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	var reqs1 <-chan *ssh.Request
 	var errConnect error
 
-	// 第一层重试握手
 	for i := 0; i < 15; i++ {
 		netConn, errConnect = dialer.Dial("tcp", fmt.Sprintf("%s:443", proxyHost))
 		if errConnect == nil {
 			sshConn1, chans1, reqs1, errConnect = ssh.NewClientConn(netConn, fmt.Sprintf("%s:443", proxyHost), proxyConfig)
-			if errConnect == nil {
-				break
-			}
+			if errConnect == nil { break }
 			netConn.Close()
 		}
 		time.Sleep(2 * time.Second)
@@ -269,7 +270,6 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 	
 	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n>>> 突破跳板机成功！正在建立第二层物理串口隧道...\r\n"))
 
-	// 第二层隧道穿透
 	targetAddr := targetOCID + ":22"
 	forwardedNetConn, err := proxyClient.Dial("tcp", targetAddr)
 	if err != nil {
@@ -317,54 +317,34 @@ func vncHandler(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		buf := make([]byte, 2048)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				_ = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
+		for { n, err := stdout.Read(buf); if n > 0 { _ = conn.WriteMessage(websocket.BinaryMessage, buf[:n]) }; if err != nil { break } }
 	}()
 
 	for {
 		msgType, msg, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
-			_, _ = stdin.Write(msg)
-		}
+		if err != nil { break }
+		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage { _, _ = stdin.Write(msg) }
 	}
 }
 
 func parseConnectionString(connStr string) (proxyUser, proxyHost, targetOCID string, err error) {
 	connStr = strings.TrimSpace(connStr)
 	parts := strings.Split(connStr, " ")
-	if len(parts) == 0 {
-		return "", "", "", fmt.Errorf("连接串为空")
-	}
+	if len(parts) == 0 { return "", "", "", fmt.Errorf("连接串为空") }
 	targetOCID = parts[len(parts)-1]
 
 	pIdx := strings.Index(connStr, "-p 443 ")
-	if pIdx == -1 {
-		return "", "", "", fmt.Errorf("未匹配到标准端口 443 路由标记")
-	}
+	if pIdx == -1 { return "", "", "", fmt.Errorf("未匹配到标准端口 443 路由标记") }
 	sub := connStr[pIdx+7:]
 	quoteIdx := strings.Index(sub, "'")
 	if quoteIdx == -1 {
 		quoteIdx = strings.Index(sub, "\"")
-		if quoteIdx == -1 {
-			return "", "", "", fmt.Errorf("连接串语法边界异常")
-		}
+		if quoteIdx == -1 { return "", "", "", fmt.Errorf("连接串语法边界异常") }
 	}
 	targetBlock := sub[:quoteIdx]
 
 	atIdx := strings.Index(targetBlock, "@")
-	if atIdx == -1 {
-		return "", "", "", fmt.Errorf("未发现特权用户分界符")
-	}
+	if atIdx == -1 { return "", "", "", fmt.Errorf("未发现特权用户分界符") }
 	proxyUser = targetBlock[:atIdx]
 	proxyHost = targetBlock[atIdx+1:]
 	return proxyUser, proxyHost, targetOCID, nil
@@ -377,7 +357,6 @@ func main() {
 		return
 	}
 
-	// 🚀 【已修复】：接收两个返回值，确保在旧数据库上安全注入缓存抽屉
 	_, _ = service.DB.Exec("ALTER TABLE oci_accounts ADD COLUMN cached_instances TEXT DEFAULT '[]'")
 	fmt.Println("✅ 扁平化安全数据库与多账号模块挂载成功！")
 
@@ -386,16 +365,17 @@ func main() {
 	http.HandleFunc("/api/accounts/list", listAccountsHandler)
 	http.HandleFunc("/api/accounts/delete", deleteAccountHandler)
 	
-	// 缓存同步分离路由
 	http.HandleFunc("/api/instances/cache", getCacheHandler)
 	http.HandleFunc("/api/instances/sync", syncInstancesHandler)
-	
 	http.HandleFunc("/api/instances/action", actionHandler)
+	
+	// 🚀 挂载最新的代理唤醒路由
+	http.HandleFunc("/api/proxy/start", startProxyHandler)
+	
 	http.HandleFunc("/api/vnc", vncHandler)
-
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
-	fmt.Println("🚀 核心全功能中控服务已成功启动！请访问: http://您的VPS公网IP:8080")
+	fmt.Println("🚀 核心全功能中控服务 (含自动化 Xray 工厂) 已成功启动！请访问: http://您的VPS公网IP:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Println("❌ 服务器端口监听遭遇致命碰撞错误:", err)
 	}
