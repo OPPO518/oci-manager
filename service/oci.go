@@ -46,13 +46,27 @@ func buildClient(accountID int) (core.ComputeClient, identity.IdentityClient, st
 	identityClient, err := identity.NewIdentityClientWithConfigurationProvider(configProvider)
 	if err != nil { return core.ComputeClient{}, identity.IdentityClient{}, "", err }
 
-	proxyURL, _ := url.Parse(proxyStr)
-	httpClient := &http.Client{
-		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
-		Timeout:   15 * time.Second,
+	// 🚨 测谎仪核心补丁：暴露裸奔真相 🚨
+	fmt.Printf("\n--- [OCI 引擎拦截器] 正在为账号ID [%d] 挂载底层请求 ---\n", accountID)
+	if proxyStr == "" {
+		fmt.Println("❌ 致命警告：数据库中该账号的 proxy_url 为空！")
+		fmt.Println("❌ 动作：本次 OCI API 请求将在公网直接【裸奔】直连甲骨文！")
+	} else {
+		fmt.Println("✅ 成功截获代理配置：", proxyStr)
+		proxyURL, parseErr := url.Parse(proxyStr)
+		if parseErr != nil || proxyURL.Scheme == "" {
+			fmt.Println("❌ 代理地址格式解析失败:", parseErr)
+		} else {
+			httpClient := &http.Client{
+				Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+				Timeout:   15 * time.Second,
+			}
+			computeClient.HTTPClient = httpClient
+			identityClient.HTTPClient = httpClient
+			fmt.Println("🔒 强制代理引擎挂载完成，流量正被逼入:", proxyURL.Host)
+		}
 	}
-	computeClient.HTTPClient = httpClient
-	identityClient.HTTPClient = httpClient
+	fmt.Println("--------------------------------------------------\n")
 
 	return computeClient, identityClient, creds.Tenancy, nil
 }
