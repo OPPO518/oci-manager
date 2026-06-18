@@ -62,7 +62,6 @@
         .vnc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: #FFF; border-bottom: 1px solid #222; padding-bottom: 10px; flex-shrink: 0; }
         #terminal-container { width: 100%; flex-grow: 1; background: #000; overflow: hidden; position: relative; }
 
-        /* 🚀 新增代理解析结果面板样式 */
         .proxy-result-box { background: #312D2A; color: #4CAF50; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 13px; margin-top: 15px; word-wrap: break-word; }
         .proxy-result-title { color: #FFF; margin-bottom: 10px; border-bottom: 1px solid #555; padding-bottom: 5px; font-weight: bold; }
         .proxy-item { display: flex; margin-bottom: 5px; }
@@ -200,8 +199,9 @@
                         </div>
                         
                         <div style="margin-top: 15px; border-top: 1px dashed #555; padding-top: 15px;">
-                            <span style="color: #FF9800; font-size: 12px; margin-bottom: 10px; display: block;">即将开放的功能预告：</span>
-                            <button disabled class="btn-secondary">⚙️ 为该节点生成本地 Xray SOCKS5 通道 (开发中)</button>
+                            <button @click="startXrayProxy" :disabled="proxyLoading" class="btn-secondary">
+                                {{ proxyLoading ? '⚙️ Xray 引擎轰鸣中...' : '⚙️ 为该节点生成本地 Xray SOCKS5 通道' }}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -234,10 +234,10 @@
                 const vncActive = ref(false); const vncTargetName = ref('');
                 let socket = null; let term = null; let fitAddon = null;
 
-                // 🚀 代理自动化工厂所需的响应式变量
                 const proxyLinkInput = ref('');
                 const parsedProxy = ref(null);
                 const proxyParseError = ref('');
+                const proxyLoading = ref(false); // 🚀 新增：代理启动的 loading 状态
 
                 watch(rawConfigText, (newText) => {
                     const extract = (key) => { const match = newText.match(new RegExp(`${key}\\s*=\\s*([^\\n\\r]+)`)); return match ? match[1].trim() : ''; };
@@ -278,7 +278,7 @@
                 
                 const switchTab = (tab) => { 
                     currentTab.value = tab; errorMsg.value = ''; successMsg.value = ''; 
-                    proxyParseError.value = ''; // 切换标签时清理报错
+                    proxyParseError.value = ''; 
                     if(tab === 'list') loadAccounts(); 
                 };
                 
@@ -392,7 +392,6 @@
                     vncActive.value = false;
                 };
 
-                // 🚀 核心大招：强大的全协议智能解析引擎
                 const parseProxyLink = () => {
                     proxyParseError.value = '';
                     parsedProxy.value = null;
@@ -401,9 +400,7 @@
 
                     try {
                         if (link.startsWith('vmess://')) {
-                            // 针对历史包袱最重的 VMess 进行 Base64 + JSON 解码
                             let b64 = link.substring(8);
-                            // 解决 JS atob 对中文字符解码可能报错的补丁
                             let jsonStr = decodeURIComponent(escape(window.atob(b64)));
                             let json = JSON.parse(jsonStr);
                             
@@ -422,7 +419,6 @@
                                 }
                             };
                         } else {
-                            // 针对极其规范的 VLESS, Trojan, Shadowsocks URI 格式
                             let url = new URL(link);
                             let protocol = url.protocol.replace(':', '').toLowerCase();
                             
@@ -436,7 +432,6 @@
                                 raw: {}
                             };
 
-                            // 把所有的扩展参数 (如 sni, pbk, flow, sid) 全部提取出来
                             url.searchParams.forEach((val, key) => { 
                                 if(key !== 'type' && key !== 'security') {
                                     proxyObj.raw[key] = val; 
@@ -444,11 +439,10 @@
                             });
 
                             if (protocol === 'vless') {
-                                proxyObj.id = url.username; // VLESS 将 UUID 藏在 username 里
+                                proxyObj.id = url.username;
                             } else if (protocol === 'trojan') {
-                                proxyObj.password = url.username; // Trojan 将密码藏在 username 里
+                                proxyObj.password = url.username;
                             } else if (protocol === 'ss') {
-                                // SS 特殊处理：老旧的 SIP002 标准将加密方式和密码以 Base64 藏在用户名里
                                 let decoded = decodeURIComponent(escape(window.atob(url.username)));
                                 let parts = decoded.split(':');
                                 proxyObj.raw['加密方式(method)'] = parts[0];
@@ -464,11 +458,39 @@
                     }
                 };
 
+                // 🚀 核心逻辑：通知后端启动 Xray 进程，并自动填入录入表单
+                const startXrayProxy = async () => {
+                    proxyLoading.value = true; proxyParseError.value = '';
+                    try {
+                        const res = await fetch('/api/proxy/start', { 
+                            method: 'POST', 
+                            headers: getAuthHeaders(), 
+                            body: JSON.stringify(parsedProxy.value) 
+                        });
+                        const data = await res.json();
+                        if (checkAuthError(res.status)) return;
+                        if (res.ok) { 
+                            // 将自动生成的代理链接赋值给录入表单
+                            newAccount.value.proxy_url = data.proxy_url;
+                            // 画面无缝切换到录入面板
+                            switchTab('add');
+                            successMsg.value = `✅ Xray 进程已在底层启动！分配到的安全通道为: ${data.proxy_url} (已自动填入)`;
+                            setTimeout(() => { successMsg.value = ''; }, 6000);
+                        } else { 
+                            proxyParseError.value = data.error; 
+                        }
+                    } catch (e) { 
+                        proxyParseError.value = "请求核心引擎失败：" + e; 
+                    } finally { 
+                        proxyLoading.value = false; 
+                    }
+                };
+
                 return { 
                     isLoggedIn, loading, actionLoading, isSyncing, errorMsg, successMsg, instances, currentTab, accounts, 
                     loginForm, newAccount, rawConfigText, keyLoaded, currentAccountID, vncActive, vncTargetName,
-                    proxyLinkInput, parsedProxy, proxyParseError, // 将解析引擎暴露给 Vue
-                    doLogin, logout, switchTab, loadAccounts, submitNewAccount, deleteAccount, loadCache, syncCloud, sendAction, openVNCTerminal, closeVNCTerminal, parseProxyLink
+                    proxyLinkInput, parsedProxy, proxyParseError, proxyLoading, // 暴露给 Vue
+                    doLogin, logout, switchTab, loadAccounts, submitNewAccount, deleteAccount, loadCache, syncCloud, sendAction, openVNCTerminal, closeVNCTerminal, parseProxyLink, startXrayProxy
                 };
             }
         }).mount('#app');
