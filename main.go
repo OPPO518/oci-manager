@@ -21,7 +21,6 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// ================= 安全拦截器 =================
 func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -33,8 +32,6 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
-
-// ================= 基础 API 接口区域 =================
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -76,10 +73,7 @@ func listAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	if !checkAuth(w, r) { return }
 
 	accounts, err := service.ListAccounts()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+	if err != nil { w.WriteHeader(http.StatusInternalServerError); return }
 	json.NewEncoder(w).Encode(map[string]interface{}{"accounts": accounts})
 }
 
@@ -97,8 +91,6 @@ func deleteAccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "账号记录已安全销毁"})
 }
-
-// ================= OCI 实例与缓存 API =================
 
 func getCacheHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -159,7 +151,7 @@ func actionHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "指令已下发！状态即将更新。"})
 }
 
-// 🚀 新增：Xray 代理工厂核心唤醒 API
+// 🚀 核心接入：Xray 代理矩阵启动器
 func startProxyHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !checkAuth(w, r) { return }
@@ -179,11 +171,10 @@ func startProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"proxy_url": proxyURL, 
-		"message": "底层 Xray 通道已打通！",
+		"message":   "底层单进程矩阵已成功加载该节点！",
 	})
 }
 
-// ================= VNC 双重隧道引擎 (保持不变) =================
 func vncHandler(w http.ResponseWriter, r *http.Request) {
 	accountID, _ := strconv.Atoi(r.URL.Query().Get("account_id"))
 	instanceID := r.URL.Query().Get("instance_id")
@@ -350,7 +341,6 @@ func parseConnectionString(connStr string) (proxyUser, proxyHost, targetOCID str
 	return proxyUser, proxyHost, targetOCID, nil
 }
 
-// ================= 主函数启动区域 =================
 func main() {
 	if err := service.InitDB(); err != nil {
 		fmt.Println("❌ 数据库初始化致命错误:", err)
@@ -369,13 +359,13 @@ func main() {
 	http.HandleFunc("/api/instances/sync", syncInstancesHandler)
 	http.HandleFunc("/api/instances/action", actionHandler)
 	
-	// 🚀 挂载最新的代理唤醒路由
+	// 挂载动态矩阵接口
 	http.HandleFunc("/api/proxy/start", startProxyHandler)
 	
 	http.HandleFunc("/api/vnc", vncHandler)
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
-	fmt.Println("🚀 核心全功能中控服务 (含自动化 Xray 工厂) 已成功启动！请访问: http://您的VPS公网IP:8080")
+	fmt.Println("🚀 核心全功能中控服务 (搭载单进程矩阵架构) 已成功启动！监听端口 :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Println("❌ 服务器端口监听遭遇致命碰撞错误:", err)
 	}
