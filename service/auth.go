@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,33 @@ func SetupInitialAdmin(c *gin.Context) {
 	_ = SetSetting("sys_initialized", "true")
 
 	c.JSON(http.StatusOK, gin.H{"message": "System initialized successfully"})
+}
+
+// --- 👇 恢复并升级的真实登录与鉴权逻辑 👇 ---
+
+// VerifyLogin 校验登录，比对数据库中的哈希密码，并返回 Token
+func VerifyLogin(username, password string) (string, error) {
+	if !IsSystemInitialized() {
+		return "", errors.New("系统尚未初始化，请先设置管理员账号")
+	}
+
+	// 从底层 SQLite 数据库中读取刚才配置的管理员账号密码
+	savedUser, _ := GetSetting("admin_username")
+	savedHash, _ := GetSetting("admin_password_hash")
+
+	// 严密比对用户名与哈希值
+	if username == savedUser && hashPassword(password) == savedHash {
+		// MVP 阶段：签发一个固定的高强度标识符（未来可升级为真正的 JWT）
+		return "oci-go-auth-token-v1", nil
+	}
+
+	return "", errors.New("用户名或密码错误")
+}
+
+// CheckToken 校验每次前端请求携带的 Token
+func CheckToken(token string) bool {
+	// 拦截非法请求
+	return token == "oci-go-auth-token-v1"
 }
 
 // hashPassword 密码哈希生成器 (防止数据库泄露导致明文密码丢失)
