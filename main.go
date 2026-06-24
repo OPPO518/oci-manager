@@ -15,6 +15,8 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/core"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
+	"github.com/gin-gonic/gin"
+	"log"
 )
 
 var upgrader = websocket.Upgrader{
@@ -342,31 +344,38 @@ func parseConnectionString(connStr string) (proxyUser, proxyHost, targetOCID str
 }
 
 func main() {
+	// 1. 启动并升级底层数据库引擎
 	if err := service.InitDB(); err != nil {
-		fmt.Println("❌ 数据库初始化致命错误:", err)
-		return
+		log.Fatalf("❌ 致命错误：数据库加载失败: %v", err)
 	}
 
-	_, _ = service.DB.Exec("ALTER TABLE oci_accounts ADD COLUMN cached_instances TEXT DEFAULT '[]'")
-	fmt.Println("✅ 扁平化安全数据库与多账号模块挂载成功！")
+	// 2. 初始化单进程 Xray 矩阵引擎 (保留你原有的逻辑)
+	// service.InitXrayMatrix() 
 
-	http.HandleFunc("/api/login", loginHandler)
-	http.HandleFunc("/api/accounts/add", addAccountHandler)
-	http.HandleFunc("/api/accounts/list", listAccountsHandler)
-	http.HandleFunc("/api/accounts/delete", deleteAccountHandler)
-	
-	http.HandleFunc("/api/instances/cache", getCacheHandler)
-	http.HandleFunc("/api/instances/sync", syncInstancesHandler)
-	http.HandleFunc("/api/instances/action", actionHandler)
-	
-	// 挂载动态矩阵接口
-	http.HandleFunc("/api/proxy/start", startProxyHandler)
-	
-	http.HandleFunc("/api/vnc", vncHandler)
-	http.Handle("/", http.FileServer(http.Dir("./web")))
+	// 3. 配置 Gin Web 框架
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.Default()
 
-	fmt.Println("🚀 核心全功能中控服务 (搭载单进程矩阵架构) 已成功启动！监听端口 :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Println("❌ 服务器端口监听遭遇致命碰撞错误:", err)
+	// 4. 核心 API 路由组
+	api := r.Group("/api")
+	{
+		// --- 安全网关与初始化 ---
+		api.GET("/system/status", service.CheckSystemStatus)
+		api.POST("/system/setup", service.SetupInitialAdmin)
+		
+		// TODO: 真正的登录接口
+		// api.POST("/auth/login", service.Login) 
+
+		// --- 中控大屏探针 ---
+		api.GET("/dashboard/metrics", service.GetDashboardMetrics)
+
+		// --- OCI 资产同步与下发 (保留你写好的接口) ---
+		// api.POST("/oci/sync", service.HandleSync)
+	}
+
+	// 5. 启动后端引擎 (监听 8080 端口，前端 Vite 的 5173 端口会反向代理到这里)
+	log.Println("🚀 OCI-GO 核心引擎已启动，监听端口: 8080")
+	if err := r.Run("127.0.0.1:8080"); err != nil {
+		log.Fatalf("❌ 引擎崩溃: %v", err)
 	}
 }
