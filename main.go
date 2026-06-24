@@ -349,7 +349,7 @@ func main() {
 		log.Fatalf("❌ 致命错误：数据库加载失败: %v", err)
 	}
 
-	// 2. 初始化单进程 Xray 矩阵引擎 (保留你原有的逻辑)
+	// 2. 初始化单进程 Xray 矩阵引擎 (如有需要，取消注释)
 	// service.InitXrayMatrix() 
 
 	// 3. 配置 Gin Web 框架
@@ -359,21 +359,29 @@ func main() {
 	// 4. 核心 API 路由组
 	api := r.Group("/api")
 	{
-		// --- 安全网关与初始化 ---
+		// === A. 新版安全网关与探针 (Gin 原生接口) ===
 		api.GET("/system/status", service.CheckSystemStatus)
 		api.POST("/system/setup", service.SetupInitialAdmin)
-		
-		// TODO: 真正的登录接口
-		// api.POST("/auth/login", service.Login) 
-
-		// --- 中控大屏探针 ---
 		api.GET("/dashboard/metrics", service.GetDashboardMetrics)
 
-		// --- OCI 资产同步与下发 (保留你写好的接口) ---
-		// api.POST("/oci/sync", service.HandleSync)
+		// === B. 旧版核心业务无缝接入 (使用 gin.WrapF 转接) ===
+		api.POST("/auth/login", gin.WrapF(loginHandler))
+		
+		api.POST("/account/add", gin.WrapF(addAccountHandler))
+		api.GET("/account/list", gin.WrapF(listAccountsHandler))
+		api.POST("/account/delete", gin.WrapF(deleteAccountHandler))
+		
+		api.GET("/oci/cache", gin.WrapF(getCacheHandler))
+		api.GET("/oci/sync", gin.WrapF(syncInstancesHandler))
+		api.POST("/oci/action", gin.WrapF(actionHandler))
+		
+		api.POST("/proxy/start", gin.WrapF(startProxyHandler))
+
+		// === C. 极其关键的 VNC WebSocket 接口 ===
+		api.GET("/vnc", gin.WrapF(vncHandler))
 	}
 
-	// 5. 启动后端引擎 (监听 8080 端口，前端 Vite 的 5173 端口会反向代理到这里)
+	// 5. 启动后端引擎 (监听 8080 端口)
 	log.Println("🚀 OCI-GO 核心引擎已启动，监听端口: 8080")
 	if err := r.Run("127.0.0.1:8080"); err != nil {
 		log.Fatalf("❌ 引擎崩溃: %v", err)
