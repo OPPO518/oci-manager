@@ -2,7 +2,6 @@ package service
 
 import (
 	"database/sql"
-	"fmt"
 )
 
 // GetSetting 获取全局系统设置
