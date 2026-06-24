@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,14 +13,14 @@ func CheckSystemStatus(c *gin.Context) {
 	if !IsSystemInitialized() {
 		// 返回 200，但明确告知业务状态为需要初始化
 		c.JSON(http.StatusOK, gin.H{
-			"status": "init_required",
+			"status":  "init_required",
 			"message": "System requires initial setup",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status": "login_required",
+		"status":  "login_required",
 		"message": "System is ready for login",
 	})
 }
@@ -47,7 +46,7 @@ func SetupInitialAdmin(c *gin.Context) {
 	hashedPassword := hashPassword(req.Password)
 	_ = SetSetting("admin_username", req.Username)
 	_ = SetSetting("admin_password_hash", hashedPassword)
-	
+
 	// 标记系统已完成初始化
 	_ = SetSetting("sys_initialized", "true")
 
