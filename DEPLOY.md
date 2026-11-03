@@ -37,7 +37,22 @@ git remote -v
 git log --oneline -1
 ```
 
-浏览器打开仓库页面，应当能看到 48 个文件，且**没有** `web/node_modules`。
+浏览器打开仓库页面，应当能看到全部源文件，且**没有** `web/node_modules`。
+
+### 3. 推送前自检（强烈建议）
+
+`.gitignore` 写错会导致文件在本地存在、却没进版本库，本地一切正常、VPS 构建才炸。
+推送前用全新克隆验证一次，成本几秒钟：
+
+```bash
+cd /tmp && rm -rf _verify && git clone <你的仓库路径> _verify && cd _verify
+go build ./...          # 能过说明推送内容完整
+cd /tmp && rm -rf _verify
+```
+
+> 曾经踩过：`.gitignore` 里裸写 `server`，把服务入口 `cmd/server/` 一并忽略，
+> 结果 VPS 上报 `stat /src/cmd/server: directory not found`。
+> 目录名一定要写成 `/server` 锚定到根目录。
 
 > 想省掉每次输 Token，可以配 SSH：
 > `ssh-keygen -t ed25519 -C "you@example.com"`，把 `~/.ssh/id_ed25519.pub` 内容加到
@@ -194,6 +209,7 @@ sudo ufw enable
 | `npm ci` 报 lock 文件不匹配 | 本地改过 `package.json` 却没更新 `package-lock.json`，本机 `cd web && npm install` 后重新提交 |
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
+| `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
 | 端口不通 | 检查 `ufw`、云厂商安全组是否放行 8080 |
 | 数据在哪 | `./data/oci-manager.db`，备份整个 `data` 目录即可；不要把 `data/` 提交到 Git |
