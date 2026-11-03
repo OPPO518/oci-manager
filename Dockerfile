@@ -1,6 +1,10 @@
-# ---------- 阶段 1：构建前端 ----------
-# 可通过构建参数换基础镜像与软件源，适应不同网络环境
+# 基础镜像变量必须声明在第一个 FROM 之前，否则属于阶段内作用域，
+# 无法用于后续 FROM，会报 "base name should not be blank"
 ARG NODE_IMAGE=node:22-alpine
+ARG GO_IMAGE=golang:1.27-alpine
+ARG RUNTIME_IMAGE=alpine:3.22
+
+# ---------- 阶段 1：构建前端 ----------
 FROM ${NODE_IMAGE} AS web
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -13,7 +17,6 @@ COPY web/ ./
 RUN npm run build
 
 # ---------- 阶段 2：构建后端 ----------
-ARG GO_IMAGE=golang:1.27-alpine
 FROM ${GO_IMAGE} AS server
 
 ARG GOPROXY=https://goproxy.cn,direct
@@ -35,7 +38,6 @@ COPY --from=web /internal/web/dist ./internal/web/dist
 RUN go build -trimpath -ldflags="-s -w" -o /out/oci-manager ./cmd/server
 
 # ---------- 阶段 3：运行 ----------
-ARG RUNTIME_IMAGE=alpine:3.22
 FROM ${RUNTIME_IMAGE}
 
 RUN apk add --no-cache ca-certificates tzdata wget \
