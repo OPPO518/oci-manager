@@ -96,7 +96,23 @@ echo "OCI_MANAGER_ENCRYPTION_KEY=$(openssl rand -hex 32)" > .env
 cat .env
 ```
 
-### 3. 构建并启动
+### 3. 准备数据目录权限（必做，否则容器会无限重启）
+
+容器以非 root 的 `app` 用户运行，而 `./data` 由 Docker 以 root 创建，
+`app` 无写权限时 SQLite 打不开文件，容器会一直 `Restarting`：
+
+```bash
+mkdir -p data
+sudo chown -R 100:100 data     # alpine 中 adduser -S app 默认 uid/gid 为 100
+```
+
+不确定 uid 时先构建一次镜像再查：
+
+```bash
+docker run --rm --entrypoint /bin/sh oci-manager:latest -c 'id app'
+```
+
+### 4. 构建并启动
 
 ```bash
 docker compose up -d --build
@@ -210,6 +226,7 @@ sudo ufw enable
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
+| 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:100 data` 后 `docker compose up -d` |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
 | 端口不通 | 检查 `ufw`、云厂商安全组是否放行 8080 |
 | 数据在哪 | `./data/oci-manager.db`，备份整个 `data` 目录即可；不要把 `data/` 提交到 Git |
