@@ -1,6 +1,9 @@
 # Go
-oci-manager
-server
+# 注意：必须加前导斜杠锚定到仓库根目录。
+# 写成裸的 server 会连带忽略 cmd/server/ 目录（服务入口），导致 VPS 构建失败
+/oci-manager
+/server
+/bin/
 *.exe
 *.dll
 *.so
