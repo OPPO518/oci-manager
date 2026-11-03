@@ -1,30 +1,44 @@
 # ---------- 阶段 1：构建前端 ----------
-FROM node:22-alpine AS web
+# 可通过构建参数换基础镜像与软件源，适应不同网络环境
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS web
+
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /web
-COPY web/package.json ./
-RUN npm install --no-audit --no-fund
+RUN npm config set registry "$NPM_REGISTRY"
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
 # ---------- 阶段 2：构建后端 ----------
-FROM golang:1.27-alpine AS server
+ARG GO_IMAGE=golang:1.27-alpine
+FROM ${GO_IMAGE} AS server
+
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=$GOPROXY \
+    GOTOOLCHAIN=local \
+    CGO_ENABLED=0 \
+    GOOS=linux
+
 WORKDIR /src
-RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-# vite 的 outDir 指向 ../internal/web/dist，在构建阶段对应 /internal/web/dist
+# vite 的 outDir 指向 ../internal/web/dist，在 web 阶段对应 /internal/web/dist
 COPY --from=web /internal/web/dist ./internal/web/dist
 
-# 纯静态编译：SQLite 使用 modernc.org/sqlite（无 CGO），目标镜像无需任何运行时依赖
-ENV CGO_ENABLED=0 GOOS=linux
+# 纯静态编译：SQLite 使用 modernc.org/sqlite（无 CGO），运行镜像无需任何额外依赖
 RUN go build -trimpath -ldflags="-s -w" -o /out/oci-manager ./cmd/server
 
 # ---------- 阶段 3：运行 ----------
-FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata \
+ARG RUNTIME_IMAGE=alpine:3.22
+FROM ${RUNTIME_IMAGE}
+
+RUN apk add --no-cache ca-certificates tzdata wget \
     && addgroup -S app && adduser -S app -G app
 
 COPY --from=server /out/oci-manager /usr/local/bin/oci-manager
@@ -36,5 +50,8 @@ VOLUME ["/data"]
 
 ENV OCI_MANAGER_ADDR=:8080 \
     OCI_MANAGER_DB=/data/oci-manager.db
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget --spider -q http://127.0.0.1:8080/api/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/oci-manager"]

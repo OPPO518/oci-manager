@@ -1,6 +1,11 @@
 services:
   oci-manager:
-    build: .
+    build:
+      context: .
+      # 国内 VPS 建议保留下方镜像源；海外 VPS 可改成官方源或直接删掉 args 块
+      args:
+        GOPROXY: https://goproxy.cn,direct
+        NPM_REGISTRY: https://registry.npmmirror.com
     image: oci-manager:latest
     container_name: oci-manager
     restart: unless-stopped
@@ -11,11 +16,13 @@ services:
     environment:
       OCI_MANAGER_ADDR: ":8080"
       OCI_MANAGER_DB: "/data/oci-manager.db"
-      # 用于加密数据库中存储的 API 私钥，部署前请替换为随机字符串
+      # 用于加密数据库中存储的 OCI API 私钥，取自同目录下的 .env
       # 生成方式：openssl rand -hex 32
-      OCI_MANAGER_ENCRYPTION_KEY: "change-me-before-deploy"
+      # 修改此值会导致已保存的账号无法解密，请勿在录入账号后随意更改
+      OCI_MANAGER_ENCRYPTION_KEY: ${OCI_MANAGER_ENCRYPTION_KEY:?请先在 .env 中设置 OCI_MANAGER_ENCRYPTION_KEY}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s

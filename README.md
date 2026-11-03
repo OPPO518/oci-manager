@@ -33,13 +33,20 @@
 
 > 私钥只保存在本地，服务端会用 AES-256-GCM 加密后写入数据库，接口永不返回明文。
 
-### 2. 启动服务
+### 2. 设置加密密钥并启动
 
 ```bash
+cp .env.example .env
+echo "OCI_MANAGER_ENCRYPTION_KEY=$(openssl rand -hex 32)" > .env
+
 docker compose up -d --build
 ```
 
 打开 http://localhost:8080 ，进入「账号」页面填入上一步的凭证。
+
+> 该密钥用于加密 OCI 私钥，录入账号后**不可再更改**，否则已存账号将无法解密。
+
+完整部署步骤（推 GitHub、VPS 构建、HTTPS 与鉴权加固、备份）见 [DEPLOY.md](DEPLOY.md)。
 
 ### 3. 本地开发
 
