@@ -192,7 +192,8 @@ sudo ufw enable
 | --- | --- |
 | `go mod download` 卡住或超时 | 国内 VPS 需要 GOPROXY 镜像，compose 里已配 `goproxy.cn`；仍慢可临时改成 `https://goproxy.io,direct` |
 | `npm ci` 报 lock 文件不匹配 | 本地改过 `package.json` 却没更新 `package-lock.json`，本机 `cd web && npm install` 后重新提交 |
-| `golang:1.27-alpine` 拉取失败 | 镜像标签可能尚未发布，用 `docker compose build --build-arg GO_IMAGE=golang:1.26-alpine` 临时降级，并把 `go.mod` 的 go 版本一并调低 |
+| `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
+| `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
 | 端口不通 | 检查 `ufw`、云厂商安全组是否放行 8080 |
 | 数据在哪 | `./data/oci-manager.db`，备份整个 `data` 目录即可；不要把 `data/` 提交到 Git |

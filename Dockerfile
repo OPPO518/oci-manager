@@ -2,7 +2,7 @@
 # 无法用于后续 FROM，会报 "base name should not be blank"
 ARG NODE_IMAGE=node:22-alpine
 ARG GO_IMAGE=golang:1.27-alpine
-ARG RUNTIME_IMAGE=alpine:3.22
+ARG RUNTIME_IMAGE=alpine:3.24
 
 # ---------- 阶段 1：构建前端 ----------
 FROM ${NODE_IMAGE} AS web
