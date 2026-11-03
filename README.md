@@ -9,6 +9,9 @@
 
 | 模块 | 能力 |
 | --- | --- |
+| **登录鉴权** | 首次访问强制设置管理员账号；密码 bcrypt 加盐存储；会话 HttpOnly Cookie，7 天有效 |
+| **两步验证** | 开启后登录需输入 Telegram 收到的 6 位验证码（5 分钟有效，错 5 次作废） |
+| **Telegram 通知** | 登录提醒、登录验证码、ARM 抢购成功/终止推送；Bot Token 加密存库 |
 | 资源总览 | 实例数量、运行中 OCPU / 内存、区间数量、本月消费 |
 | 实例管理 | 列表、启动 / 停止 / 重启、调整 Flex 规格、终止（可选保留启动卷） |
 | ARM 抢购 | 定时重试创建 Ampere A1 实例，仅在 `Out of host capacity` 时继续，实时日志 |
@@ -42,7 +45,26 @@ echo "OCI_MANAGER_ENCRYPTION_KEY=$(openssl rand -hex 32)" > .env
 docker compose up -d --build
 ```
 
-打开 http://localhost:8080 ，进入「账号」页面填入上一步的凭证。
+### 3. 初始化管理员账号
+
+打开 http://localhost:8080 ，**首次访问会要求设置用户名和密码**（3–32 位用户名、至少 8 位密码）。
+设置完成后所有接口都需要登录才能访问。
+
+> 忘记密码：登录服务器删除数据库中的 `admins` 表后重新初始化即可。
+
+### 4. 填入 OCI 凭证
+
+进入「账号」页面填入第 1 步拿到的凭证。
+
+### 5. 配置 Telegram 通知（可选但推荐）
+
+1. Telegram 搜索 `@BotFather`，发送 `/newbot`，按提示创建机器人，得到 **Bot Token**
+2. 给你创建的机器人**发一条任意消息**（否则机器人无法主动给你发消息）
+3. 浏览器打开 `https://api.telegram.org/bot<你的TOKEN>/getUpdates`，从返回的 JSON 里找到 `chat.id`
+4. 在面板「设置」页填入 Token 和 Chat ID，勾选需要的通知项，点「发送测试消息」验证
+
+勾选「登录时要求输入 Telegram 验证码」后，登录流程变为：密码校验通过 → Telegram 收到 6 位验证码 → 输入验证码才能进入。
+**验证码发送失败时会直接拒绝登录**，不会降级成仅密码登录。
 
 > 该密钥用于加密 OCI 私钥，录入账号后**不可再更改**，否则已存账号将无法解密。
 
@@ -102,6 +124,8 @@ internal/secret      私钥加密（AES-256-GCM）
 internal/store       SQLite 持久化（账号、抢购任务、日志）
 internal/oci         OCI API 封装与多账号客户端池
 internal/api         HTTP 接口与静态资源服务
+internal/auth        管理员账号、登录会话与两步验证
+internal/notify      Telegram 通知
 internal/grabber     抢购任务调度
 internal/web         内嵌前端产物
 web                  React 前端源码

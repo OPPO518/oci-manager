@@ -1,13 +1,39 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { Loading } from './components/ui'
+import { setUnauthorizedHandler } from './lib/api'
+import { AuthProvider, useAuth } from './lib/auth'
 import { AccountProvider } from './lib/context'
 import Accounts from './pages/Accounts'
 import Cost from './pages/Cost'
 import Grabber from './pages/Grabber'
 import Instances from './pages/Instances'
+import Login from './pages/Login'
 import Overview from './pages/Overview'
+import Settings from './pages/Settings'
 
-export default function App() {
+/** 未登录时只渲染登录页，避免 AccountProvider 发出无谓的 401 请求 */
+function Shell() {
+  const { loading, authenticated, expire } = useAuth()
+
+  useEffect(() => {
+    setUnauthorizedHandler(expire)
+    return () => setUnauthorizedHandler(null)
+  }, [expire])
+
+  if (loading) {
+    return (
+      <div className="flex min-h-full items-center justify-center py-24">
+        <Loading text="正在检查登录状态…" />
+      </div>
+    )
+  }
+
+  if (!authenticated) {
+    return <Login />
+  }
+
   return (
     <AccountProvider>
       <BrowserRouter>
@@ -18,10 +44,19 @@ export default function App() {
             <Route path="/grabber" element={<Grabber />} />
             <Route path="/cost" element={<Cost />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         </Layout>
       </BrowserRouter>
     </AccountProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Shell />
+    </AuthProvider>
   )
 }

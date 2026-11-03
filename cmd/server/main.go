@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/yourname/oci-manager/internal/api"
+	"github.com/yourname/oci-manager/internal/auth"
 	"github.com/yourname/oci-manager/internal/config"
 	"github.com/yourname/oci-manager/internal/grabber"
+	"github.com/yourname/oci-manager/internal/notify"
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/secret"
 	"github.com/yourname/oci-manager/internal/store"
@@ -50,13 +52,17 @@ func run() error {
 	}
 	defer db.Close()
 
+	notifier := notify.New(db)
 	pool := oci.NewPool(db)
-	tasks := grabber.NewManager(db, pool)
+	tasks := grabber.NewManager(db, pool, notifier)
 	if err := tasks.RecoverOrphans(); err != nil {
 		log.Printf("清理遗留任务失败: %v", err)
 	}
 
-	srv, err := api.New(cfg, db, pool, tasks)
+	authSvc := auth.New(db, notifier)
+	go cleanupLoop(authSvc)
+
+	srv, err := api.New(cfg, db, pool, tasks, authSvc, notifier)
 	if err != nil {
 		return err
 	}
@@ -72,6 +78,9 @@ func run() error {
 		log.Printf("OCI 管理器已启动，监听 %s", cfg.Addr)
 		if cfg.WarnDevelopmentKey {
 			log.Printf("警告：未设置环境变量 OCI_MANAGER_ENCRYPTION_KEY，正在使用默认密钥，请勿用于生产环境")
+		}
+		if st, err := authSvc.Status(); err == nil && !st.Initialized {
+			log.Printf("尚未设置管理员账号，请打开面板完成初始化设置")
 		}
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -91,4 +100,15 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(ctx)
+}
+
+// cleanupLoop 定期清理过期的会话与登录挑战。
+func cleanupLoop(svc *auth.Service) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := svc.Cleanup(); err != nil {
+			log.Printf("清理过期会话失败: %v", err)
+		}
+	}
 }

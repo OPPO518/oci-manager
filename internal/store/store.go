@@ -113,6 +113,42 @@ func (s *Store) migrate() error {
 			created_at DATETIME NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_grab_task_logs_task ON grab_task_logs(task_id, id);`,
+
+		// 键值形式的运行时设置。敏感项（如 Telegram Bot Token）由 Sealer 加密后存放。
+		`CREATE TABLE IF NOT EXISTS settings (
+			key        TEXT PRIMARY KEY,
+			value      TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME NOT NULL
+		);`,
+
+		// 管理员账号。整个系统只允许一个，用 CHECK 约束保证。
+		`CREATE TABLE IF NOT EXISTS admins (
+			id            INTEGER PRIMARY KEY CHECK (id = 1),
+			username      TEXT NOT NULL,
+			password_hash TEXT NOT NULL,
+			created_at    DATETIME NOT NULL,
+			updated_at    DATETIME NOT NULL
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token        TEXT PRIMARY KEY,
+			username     TEXT NOT NULL,
+			created_at   DATETIME NOT NULL,
+			expires_at   DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);`,
+
+		// 登录挑战：两步验证时暂存验证码哈希，验证码本身不落库。
+		`CREATE TABLE IF NOT EXISTS login_challenges (
+			token      TEXT PRIMARY KEY,
+			username   TEXT NOT NULL,
+			code_hash  TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			attempts   INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_login_challenges_expires ON login_challenges(expires_at);`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.Exec(stmt); err != nil {

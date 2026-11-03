@@ -152,3 +152,35 @@ export interface TestResult {
   region_count: number
   latency_ms: number
 }
+
+/** 鉴权状态：initialized 为 false 时前端展示初始化表单 */
+export interface AuthStatus {
+  initialized: boolean
+  authenticated: boolean
+  username: string
+  login_otp: boolean
+  telegram_enabled: boolean
+}
+
+/** 登录结果：otp_required 为 true 时需要再输入 Telegram 验证码 */
+export interface LoginResult {
+  otp_required: boolean
+  challenge: string
+  username: string
+}
+
+export interface TelegramSettings {
+  enabled: boolean
+  chat_id: string
+  has_token: boolean
+  login_otp: boolean
+  event_grab: boolean
+}
+
+export interface TelegramSettingsInput {
+  enabled: boolean
+  bot_token: string
+  chat_id: string
+  login_otp: boolean
+  event_grab: boolean
+}

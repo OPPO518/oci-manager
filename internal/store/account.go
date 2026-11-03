@@ -11,15 +11,15 @@ import (
 
 // Account 是一个 OCI 账号的公开信息，不含私钥等敏感内容。
 type Account struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	TenancyOCID  string    `json:"tenancy_ocid"`
-	UserOCID     string    `json:"user_ocid"`
-	Fingerprint  string    `json:"fingerprint"`
-	Region       string    `json:"region"`
-	ProxyURL     string    `json:"proxy_url"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	TenancyOCID string    `json:"tenancy_ocid"`
+	UserOCID    string    `json:"user_ocid"`
+	Fingerprint string    `json:"fingerprint"`
+	Region      string    `json:"region"`
+	ProxyURL    string    `json:"proxy_url"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // AccountSecret 是账号的敏感凭据，存储时加密、读取时解密。
@@ -32,14 +32,14 @@ type AccountSecret struct {
 
 // AccountInput 用于创建或更新账号。
 type AccountInput struct {
-	Name         string
-	TenancyOCID  string
-	UserOCID     string
-	Fingerprint  string
-	Region       string
-	ProxyURL     string
+	Name          string
+	TenancyOCID   string
+	UserOCID      string
+	Fingerprint   string
+	Region        string
+	ProxyURL      string
 	PrivateKeyPEM string
-	Passphrase   string
+	Passphrase    string
 	// KeepExistingKey 为 true 时保留库中已有的私钥（用于只改代理等场景）。
 	KeepExistingKey bool
 }

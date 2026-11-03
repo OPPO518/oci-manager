@@ -1,20 +1,31 @@
 import type {
   Account,
   AccountInput,
+  AuthStatus,
   Compartment,
   GrabTask,
   GrabTaskInput,
   GrabTaskLog,
   Image,
   Instance,
+  LoginResult,
   Overview,
   Region,
   Subnet,
+  TelegramSettings,
+  TelegramSettingsInput,
   TestResult,
   UsagePoint,
 } from './types'
 
 const BASE = '/api'
+
+// 任何接口返回 401 都说明会话失效，统一回到登录页
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  unauthorizedHandler = fn
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
@@ -28,6 +39,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T
   }
   const text = await res.text()
+  if (res.status === 401 && path !== '/auth/status' && unauthorizedHandler) {
+    unauthorizedHandler()
+  }
   if (!res.ok) {
     let message = text
     try {
@@ -36,7 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // 非 JSON 响应直接使用原始文本
     }
-    throw new Error(message || `请求失败（HTTP ${res.status}）`)
+    throw new ApiError(message || `请求失败（HTTP ${res.status}）`, res.status)
   }
   return JSON.parse(text) as T
 }
@@ -50,7 +64,56 @@ function query(params: Record<string, string | undefined>): string {
   return qs ? `?${qs}` : ''
 }
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+    this.name = 'ApiError'
+  }
+}
+
 export const api = {
+  auth: {
+    status: () => request<AuthStatus>('/auth/status'),
+    setup: (username: string, password: string) =>
+      request<{ status: string }>('/auth/setup', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      }),
+    login: (username: string, password: string) =>
+      request<LoginResult>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      }),
+    verifyOtp: (challenge: string, code: string) =>
+      request<{ status: string; username: string }>('/auth/otp', {
+        method: 'POST',
+        body: JSON.stringify({ challenge, code }),
+      }),
+    logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
+    changePassword: (username: string, oldPassword: string, newPassword: string) =>
+      request<{ status: string }>('/auth/password', {
+        method: 'POST',
+        body: JSON.stringify({
+          username,
+          old_password: oldPassword,
+          new_password: newPassword,
+        }),
+      }),
+  },
+
+  telegram: {
+    get: () => request<TelegramSettings>('/settings/telegram'),
+    save: (body: TelegramSettingsInput) =>
+      request<TelegramSettings>('/settings/telegram', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    test: () => request<{ status: string }>('/settings/telegram/test', { method: 'POST' }),
+  },
+
   accounts: {
     list: () => request<Account[]>('/accounts'),
     get: (id: string) => request<Account>(`/accounts/${id}`),

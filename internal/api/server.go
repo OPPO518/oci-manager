@@ -9,8 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/yourname/oci-manager/internal/auth"
 	"github.com/yourname/oci-manager/internal/config"
 	"github.com/yourname/oci-manager/internal/grabber"
+	"github.com/yourname/oci-manager/internal/notify"
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/store"
 	"github.com/yourname/oci-manager/internal/web"
@@ -22,15 +24,24 @@ type Server struct {
 	store    *store.Store
 	pool     *oci.Pool
 	grabber  *grabber.Manager
+	auth     *auth.Service
+	notify   *notify.Service
 	engine   *gin.Engine
 	staticFS http.FileSystem
 }
 
 // New 构造 HTTP 服务。
-func New(cfg *config.Config, st *store.Store, pool *oci.Pool, gm *grabber.Manager) (*Server, error) {
+func New(
+	cfg *config.Config,
+	st *store.Store,
+	pool *oci.Pool,
+	gm *grabber.Manager,
+	authSvc *auth.Service,
+	notifySvc *notify.Service,
+) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 
-	s := &Server{cfg: cfg, store: st, pool: pool, grabber: gm}
+	s := &Server{cfg: cfg, store: st, pool: pool, grabber: gm, auth: authSvc, notify: notifySvc}
 
 	if cfg.WebDir != "" {
 		s.staticFS = http.Dir(cfg.WebDir)
@@ -52,9 +63,26 @@ func New(cfg *config.Config, st *store.Store, pool *oci.Pool, gm *grabber.Manage
 func (s *Server) Handler() http.Handler { return s.engine }
 
 func (s *Server) registerRoutes() {
-	api := s.engine.Group("/api")
+	// 公开接口：健康检查与鉴权相关
+	public := s.engine.Group("/api")
 	{
-		api.GET("/health", s.health)
+		public.GET("/health", s.health)
+		public.POST("/auth/setup", s.authSetup)
+		public.POST("/auth/login", s.authLogin)
+		public.POST("/auth/otp", s.authVerifyOTP)
+	}
+	// 状态查询单独注册在受保护组之外，因为未登录时也要能拿到初始化状态
+	s.engine.GET("/api/auth/status", s.authStatus)
+
+	// 其余接口需要有效会话
+	api := s.engine.Group("/api", s.requireAuth)
+	{
+		api.POST("/auth/logout", s.authLogout)
+		api.POST("/auth/password", s.authChangePassword)
+
+		api.GET("/settings/telegram", s.telegramSettings)
+		api.PUT("/settings/telegram", s.saveTelegramSettings)
+		api.POST("/settings/telegram/test", s.testTelegram)
 
 		api.GET("/accounts", s.listAccounts)
 		api.POST("/accounts", s.createAccount)

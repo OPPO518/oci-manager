@@ -8,38 +8,38 @@ import (
 
 // 抢购任务状态取值。
 const (
-	StatusIdle     = "idle"     // 未启动
-	StatusRunning  = "running"  // 正在轮询重试
-	StatusSuccess  = "success"  // 已成功创建实例
-	StatusFailed   = "failed"   // 停止并失败
-	StatusStopped  = "stopped"  // 用户手动停止
+	StatusIdle    = "idle"    // 未启动
+	StatusRunning = "running" // 正在轮询重试
+	StatusSuccess = "success" // 已成功创建实例
+	StatusFailed  = "failed"  // 停止并失败
+	StatusStopped = "stopped" // 用户手动停止
 )
 
 // GrabTask 描述一个 ARM 实例抢购任务。
 type GrabTask struct {
-	ID             string     `json:"id"`
-	AccountID      string     `json:"account_id"`
-	DisplayName    string     `json:"display_name"`
-	Region         string     `json:"region"`
-	CompartmentID  string     `json:"compartment_id"`
-	ADName         string     `json:"ad_name"`
-	Shape          string     `json:"shape"`
-	OCPUs          int        `json:"ocpus"`
-	MemoryGBs      int        `json:"memory_gbs"`
-	ImageID        string     `json:"image_id"`
-	SubnetID       string     `json:"subnet_id"`
-	SSHPublicKey   string     `json:"ssh_public_key"`
-	BootVolumeGBs  int        `json:"boot_volume_gbs"`
-	InstanceCount  int        `json:"instance_count"`
-	IntervalSec    int        `json:"interval_sec"`
-	MaxAttempts    int        `json:"max_attempts"`
-	Status         string     `json:"status"`
-	Message        string     `json:"message"`
-	Attempts       int        `json:"attempts"`
-	InstanceIDs    []string   `json:"instance_ids"`
-	LastAttemptAt  *time.Time `json:"last_attempt_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID            string     `json:"id"`
+	AccountID     string     `json:"account_id"`
+	DisplayName   string     `json:"display_name"`
+	Region        string     `json:"region"`
+	CompartmentID string     `json:"compartment_id"`
+	ADName        string     `json:"ad_name"`
+	Shape         string     `json:"shape"`
+	OCPUs         int        `json:"ocpus"`
+	MemoryGBs     int        `json:"memory_gbs"`
+	ImageID       string     `json:"image_id"`
+	SubnetID      string     `json:"subnet_id"`
+	SSHPublicKey  string     `json:"ssh_public_key"`
+	BootVolumeGBs int        `json:"boot_volume_gbs"`
+	InstanceCount int        `json:"instance_count"`
+	IntervalSec   int        `json:"interval_sec"`
+	MaxAttempts   int        `json:"max_attempts"`
+	Status        string     `json:"status"`
+	Message       string     `json:"message"`
+	Attempts      int        `json:"attempts"`
+	InstanceIDs   []string   `json:"instance_ids"`
+	LastAttemptAt *time.Time `json:"last_attempt_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // GrabTaskInput 用于创建抢购任务。

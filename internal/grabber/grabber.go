@@ -9,6 +9,8 @@ package grabber
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +18,19 @@ import (
 	"github.com/yourname/oci-manager/internal/store"
 )
 
+// Notifier 用于在抢购任务状态变化时推送通知。
+type Notifier interface {
+	// GrabEventEnabled 返回是否开启了抢购事件通知。
+	GrabEventEnabled() bool
+	// Send 推送一条消息。
+	Send(text string) error
+}
+
 // Manager 管理抢购任务的生命周期。
 type Manager struct {
-	store *store.Store
-	pool  *oci.Pool
+	store  *store.Store
+	pool   *oci.Pool
+	notify Notifier
 
 	mu      sync.Mutex
 	running map[string]*taskHandle
@@ -29,13 +40,38 @@ type taskHandle struct {
 	cancel context.CancelFunc
 }
 
-// NewManager 创建调度器。
-func NewManager(st *store.Store, pool *oci.Pool) *Manager {
+// NewManager 创建调度器。notify 可为 nil，表示不推送通知。
+func NewManager(st *store.Store, pool *oci.Pool, notify Notifier) *Manager {
 	return &Manager{
 		store:   st,
 		pool:    pool,
+		notify:  notify,
 		running: make(map[string]*taskHandle),
 	}
+}
+
+// notifyGrab 推送抢购事件。未配置通知或发送失败都不影响任务本身。
+func (m *Manager) notifyGrab(text string) {
+	if m.notify == nil || !m.notify.GrabEventEnabled() {
+		return
+	}
+	if err := m.notify.Send(text); err != nil {
+		log.Printf("推送抢购通知失败: %v", err)
+	}
+}
+
+// taskSummary 生成任务摘要，用于通知正文。
+func taskSummary(t *store.GrabTask) string {
+	var sb strings.Builder
+	sb.WriteString("任务：")
+	sb.WriteString(t.DisplayName)
+	sb.WriteString("\n区域：")
+	sb.WriteString(t.Region)
+	sb.WriteString("\n规格：")
+	fmt.Fprintf(&sb, "%s（%d OCPU / %d GB）", t.Shape, t.OCPUs, t.MemoryGBs)
+	sb.WriteString("\n可用域：")
+	sb.WriteString(t.ADName)
+	return sb.String()
 }
 
 // RecoverOrphans 在服务启动时清理上次运行遗留的 running 任务。
@@ -131,6 +167,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 		if err != nil {
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed, err.Error())
 			_ = m.store.AppendLog(taskID, "error", "获取账号客户端失败："+err.Error())
+			m.notifyGrab("❌ 抢购任务已终止\n\n" + taskSummary(task) +
+				"\n原因：获取账号客户端失败：" + err.Error())
 			return
 		}
 
@@ -142,6 +180,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 				fmt.Sprintf("成功创建 %d 台实例", len(created)), created)
 			_ = m.store.AppendLog(taskID, "success",
 				fmt.Sprintf("抢购成功，实例 ID：%v", created))
+			m.notifyGrab("🎉 ARM 抢购成功\n\n" + taskSummary(task) +
+				fmt.Sprintf("\n实例 ID：%s\n第 %d 次尝试", strings.Join(created, "\n"), attempt))
 			return
 		}
 
@@ -150,6 +190,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			_, _ = m.store.RecordAttempt(taskID, false, launchErr.Error(), nil)
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed, launchErr.Error())
 			_ = m.store.AppendLog(taskID, "error", "创建失败："+launchErr.Error())
+			m.notifyGrab("❌ 抢购任务已终止\n\n" + taskSummary(task) +
+				"\n原因：" + launchErr.Error())
 			return
 		}
 
@@ -159,6 +201,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 		if task.MaxAttempts > 0 && attempt >= task.MaxAttempts {
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed,
 				fmt.Sprintf("已达最大尝试次数 %d，仍未抢到资源", task.MaxAttempts))
+			m.notifyGrab("⏹ 抢购任务已结束\n\n" + taskSummary(task) +
+				fmt.Sprintf("\n已达最大尝试次数 %d，仍未抢到资源", task.MaxAttempts))
 			return
 		}
 
