@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-oracle-surface text-oracle-ink antialiased;
+    font-size: 14px;
+  }
+}
+
+@layer components {
+  .oci-card {
+    @apply rounded border border-oracle-border bg-white;
+  }
+
+  .oci-btn {
+    @apply inline-flex items-center justify-center rounded border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .oci-btn-primary {
+    @apply oci-btn border-oracle-red bg-oracle-red text-white hover:border-oracle-redHover hover:bg-oracle-redHover;
+  }
+
+  .oci-btn-secondary {
+    @apply oci-btn border-oracle-border bg-white text-oracle-ink hover:bg-oracle-surface;
+  }
+
+  .oci-btn-danger {
+    @apply oci-btn border-oracle-red bg-white text-oracle-red hover:bg-oracle-red hover:text-white;
+  }
+
+  .oci-input {
+    @apply w-full rounded border border-oracle-border bg-white px-3 py-1.5 text-sm outline-none focus:border-oracle-red;
+  }
+
+  .oci-label {
+    @apply mb-1 block text-xs font-medium text-oracle-muted;
+  }
+
+  .oci-table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .oci-table th {
+    @apply border-b border-oracle-border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-oracle-muted;
+  }
+
+  .oci-table td {
+    @apply border-b border-oracle-border px-3 py-2 align-middle;
+  }
+
+  .oci-table tbody tr:hover {
+    @apply bg-oracle-surface;
+  }
+}

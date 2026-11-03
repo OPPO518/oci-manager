@@ -1,0 +1,8 @@
+.git
+.github
+data
+*.db
+*.pem
+web/node_modules
+web/dist
+README.md
