@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -21,6 +23,14 @@ type Store struct {
 
 // Open 打开（必要时创建）数据库并建表。
 func Open(path string, sealer *secret.Sealer) (*Store, error) {
+	// 容器里 /data 由卷挂载提供，但目录可能不存在或属主不对。
+	// 这里主动创建，避免 SQLite 报 unable to open database file (14)。
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("创建数据库目录 %s 失败: %w", dir, err)
+		}
+	}
+
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
@@ -31,7 +41,7 @@ func Open(path string, sealer *secret.Sealer) (*Store, error) {
 	db.SetConnMaxLifetime(time.Hour)
 
 	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("连接数据库失败: %w", err)
+		return nil, fmt.Errorf("连接数据库失败（路径 %s，请确认该目录存在且进程有写权限）: %w", path, err)
 	}
 
 	s := &Store{db: db, sealer: sealer}

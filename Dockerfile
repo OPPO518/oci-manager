@@ -45,6 +45,10 @@ RUN apk add --no-cache ca-certificates tzdata wget \
 
 COPY --from=server /out/oci-manager /usr/local/bin/oci-manager
 
+# 预先创建 /data 并交给 app，避免绑定挂载的宿主机目录属主为 root 时
+# 进程无权写入，导致 SQLite 报 unable to open database file (14)
+RUN mkdir -p /data && chown -R app:app /data
+
 USER app
 WORKDIR /home/app
 EXPOSE 8080
