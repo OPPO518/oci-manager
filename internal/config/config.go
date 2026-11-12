@@ -13,6 +13,9 @@ import (
 type Config struct {
 	// Addr 是 HTTP 服务监听地址，例如 ":8080"。
 	Addr string
+	// HTTPSAddr 是 HTTPS 服务监听地址。容器内使用高位端口（默认 :8443），
+	// 由 Docker 映射到宿主机 443，避免非 root 用户无法绑定特权端口。
+	HTTPSAddr string
 	// DBPath 是 SQLite 数据库文件路径。
 	DBPath string
 	// EncryptionKey 用于加密数据库中存储的 API 私钥，必须是 32 字节。
@@ -25,6 +28,7 @@ type Config struct {
 
 const (
 	envAddr          = "OCI_MANAGER_ADDR"
+	envHTTPSAddr     = "OCI_MANAGER_HTTPS_ADDR"
 	envDBPath        = "OCI_MANAGER_DB"
 	envEncryptionKey = "OCI_MANAGER_ENCRYPTION_KEY"
 	envWebDir        = "OCI_MANAGER_WEB_DIR"
@@ -35,8 +39,9 @@ const (
 // 未设置时使用固定的开发用默认值，并明确提示不要用于生产环境。
 func Load() (*Config, error) {
 	cfg := &Config{
-		Addr:   envOrDefault(envAddr, ":8080"),
-		DBPath: envOrDefault(envDBPath, "./data/oci-manager.db"),
+		Addr:      envOrDefault(envAddr, ":8080"),
+		HTTPSAddr: envOrDefault(envHTTPSAddr, ":8443"),
+		DBPath:    envOrDefault(envDBPath, "./data/oci-manager.db"),
 		WebDir: os.Getenv(envWebDir),
 	}
 

@@ -184,3 +184,58 @@ export interface TelegramSettingsInput {
   login_otp: boolean
   event_grab: boolean
 }
+
+/** 容量探测：单个可用域 / 故障域组合的结果 */
+export interface CapacityResult {
+  availability_domain: string
+  fault_domain: string
+  shape: string
+  ocpus: number
+  memory_gbs: number
+  availability_status: string
+  available: boolean
+  available_count: number | null
+  time_created: string
+  error?: string
+}
+
+export interface CapacityQueryInput {
+  region: string
+  shape: string
+  ocpus: number
+  memory_gbs: number
+  availability_domains: string[]
+}
+
+export interface CapacityResponse {
+  region: string
+  shape: string
+  ocpus: number
+  memory_gbs: number
+  compartment_id: string
+  items: CapacityResult[]
+  checked_at: string
+  unsupported: boolean
+  hint: string
+}
+
+/** HTTPS 证书配置状态 */
+export interface TLSSettings {
+  enabled: boolean
+  domain: string
+  email: string
+  has_token: boolean
+  cert_issued: boolean
+  expires_at: string
+  last_error: string
+  staging: boolean
+  https_port: string
+}
+
+export interface TLSSettingsInput {
+  enabled: boolean
+  domain: string
+  email: string
+  cf_api_token: string
+  staging: boolean
+}

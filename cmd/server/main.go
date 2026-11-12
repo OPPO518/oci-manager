@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -21,6 +22,7 @@ import (
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/secret"
 	"github.com/yourname/oci-manager/internal/store"
+	"github.com/yourname/oci-manager/internal/tlsmanager"
 )
 
 func main() {
@@ -62,20 +64,37 @@ func run() error {
 	authSvc := auth.New(db, notifier)
 	go cleanupLoop(authSvc)
 
-	srv, err := api.New(cfg, db, pool, tasks, authSvc, notifier)
+	tlsMgr := tlsmanager.New(db, filepath.Join(filepath.Dir(cfg.DBPath), "certs"), cfg.HTTPSAddr)
+	tlsMgr.Load()
+	tlsMgr.StartRenewLoop()
+
+	srv, err := api.New(cfg, db, pool, tasks, authSvc, notifier, tlsMgr)
 	if err != nil {
 		return err
 	}
 
+	handler := srv.Handler()
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           srv.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
+	// HTTPS 监听始终启动。尚未配置证书时握手会失败，但 HTTP 端口始终可用，
+	// 因此用户一定能够进入后台完成配置；申请成功后证书热加载、立即生效。
+	httpsSrv := &http.Server{
+		Addr:              cfg.HTTPSAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+	tlsListener, err := tls.Listen("tcp", cfg.HTTPSAddr, tlsMgr.TLSConfig())
+	if err != nil {
+		return fmt.Errorf("启动 HTTPS 监听 %s 失败: %w", cfg.HTTPSAddr, err)
+	}
+
+	errCh := make(chan error, 2)
 	go func() {
-		log.Printf("OCI 管理器已启动，监听 %s", cfg.Addr)
+		log.Printf("OCI 管理器已启动，HTTP 监听 %s，HTTPS 监听 %s", cfg.Addr, cfg.HTTPSAddr)
 		if cfg.WarnDevelopmentKey {
 			log.Printf("警告：未设置环境变量 OCI_MANAGER_ENCRYPTION_KEY，正在使用默认密钥，请勿用于生产环境")
 		}
@@ -83,6 +102,11 @@ func run() error {
 			log.Printf("尚未设置管理员账号，请打开面板完成初始化设置")
 		}
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+	go func() {
+		if err := httpsSrv.Serve(tlsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -99,6 +123,7 @@ func run() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	_ = httpsSrv.Shutdown(ctx)
 	return httpSrv.Shutdown(ctx)
 }
 

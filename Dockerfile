@@ -51,10 +51,13 @@ RUN mkdir -p /data && chown -R app:app /data
 
 USER app
 WORKDIR /home/app
-EXPOSE 8080
+# 8080 = HTTP（始终可用），8443 = HTTPS（证书配置后生效）。
+# 使用高位端口是因为容器以非 root 的 app 用户运行，无法绑定 443 特权端口。
+EXPOSE 8080 8443
 VOLUME ["/data"]
 
 ENV OCI_MANAGER_ADDR=:8080 \
+    OCI_MANAGER_HTTPS_ADDR=:8443 \
     OCI_MANAGER_DB=/data/oci-manager.db
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

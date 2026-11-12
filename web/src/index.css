@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------
+   Oracle Cloud Console (Redwood) 视觉基线
+   深色全局顶栏 + 白色侧栏 + 浅灰内容区 + Oracle Red 主色
+   ------------------------------------------------------------------ */
+:root {
+  --oci-red: #c74634;
+  --oci-red-dark: #a4372a;
+  --oci-red-soft: #fbeeeb;
+  --oci-ink: #312d2a;
+  --oci-text: #3d3a37;
+  --oci-muted: #6b6763;
+  --oci-border: #dedcd9;
+  --oci-border-strong: #c9c6c2;
+  --oci-surface: #f7f6f4;
+  --oci-canvas: #f4f3f1;
+  --oci-topbar: #312d2a;
+  --oci-topbar-hover: #46413d;
+  --oci-green: #1b7f4b;
+  --oci-amber: #b26a00;
+  --oci-blue: #1a6ba8;
+}
+
 @layer base {
   html,
   body,
@@ -10,53 +32,524 @@
   }
 
   body {
-    @apply bg-oracle-surface text-oracle-ink antialiased;
+    @apply text-oracle-ink antialiased;
+    background: var(--oci-canvas);
     font-size: 14px;
+    font-family: "Oracle Sans", "Helvetica Neue", Inter, system-ui, -apple-system,
+      "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+
+  ::selection {
+    background: var(--oci-red-soft);
   }
 }
 
 @layer components {
-  .oci-card {
-    @apply rounded border border-oracle-border bg-white;
+  /* ---------- 全局顶栏 ---------- */
+  .oci-topbar {
+    height: 48px;
+    background: var(--oci-topbar);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
   }
 
+  .oci-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+  }
+
+  .oci-brand-mark {
+    width: 22px;
+    height: 22px;
+    border: 3px solid var(--oci-red);
+    border-radius: 3px;
+    display: inline-block;
+    box-sizing: border-box;
+  }
+
+  .oci-brand-divider {
+    width: 1px;
+    height: 20px;
+    background: rgb(255 255 255 / 0.22);
+  }
+
+  .oci-topbar-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    min-width: 240px;
+    max-width: 360px;
+    padding: 0 10px;
+    border: 1px solid rgb(255 255 255 / 0.24);
+    border-radius: 4px;
+    background: rgb(255 255 255 / 0.07);
+    color: rgb(255 255 255 / 0.65);
+    font-size: 12px;
+  }
+
+  .oci-topbar-select {
+    height: 30px;
+    border: 1px solid rgb(255 255 255 / 0.24);
+    border-radius: 4px;
+    background: rgb(255 255 255 / 0.07);
+    color: #fff;
+    font-size: 12px;
+    padding: 0 8px;
+    outline: none;
+    max-width: 200px;
+  }
+
+  .oci-topbar-select option {
+    color: var(--oci-ink);
+    background: #fff;
+  }
+
+  .oci-topbar-icon {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    color: rgb(255 255 255 / 0.85);
+    transition: background 0.15s;
+  }
+
+  .oci-topbar-icon:hover {
+    background: var(--oci-topbar-hover);
+  }
+
+  .oci-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--oci-red);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* ---------- 侧栏 ---------- */
+  .oci-sidebar {
+    width: 236px;
+    flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid var(--oci-border);
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 48px;
+    height: calc(100vh - 48px);
+    overflow-y: auto;
+  }
+
+  .oci-sidebar-title {
+    padding: 18px 20px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--oci-muted);
+  }
+
+  .oci-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 18px 9px 20px;
+    font-size: 13px;
+    color: var(--oci-text);
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s;
+    border-left: 3px solid transparent;
+  }
+
+  .oci-nav-item:hover {
+    background: var(--oci-surface);
+    color: var(--oci-ink);
+  }
+
+  .oci-nav-item.active {
+    background: var(--oci-red-soft);
+    color: var(--oci-red-dark);
+    font-weight: 600;
+    border-left-color: var(--oci-red);
+  }
+
+  .oci-nav-item svg {
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+
+  .oci-nav-item.active svg {
+    opacity: 1;
+  }
+
+  /* ---------- 内容区 ---------- */
+  .oci-content {
+    flex: 1;
+    min-width: 0;
+    padding: 0 28px 40px;
+  }
+
+  .oci-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--oci-muted);
+    padding: 16px 0 10px;
+  }
+
+  .oci-breadcrumb a:hover {
+    color: var(--oci-red);
+    text-decoration: underline;
+  }
+
+  .oci-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 18px;
+  }
+
+  .oci-page-title {
+    font-size: 24px;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--oci-ink);
+    letter-spacing: -0.2px;
+  }
+
+  .oci-page-desc {
+    margin-top: 5px;
+    font-size: 13px;
+    color: var(--oci-muted);
+    max-width: 780px;
+    line-height: 1.55;
+  }
+
+  /* ---------- 卡片 ---------- */
+  .oci-card {
+    background: #fff;
+    border: 1px solid var(--oci-border);
+    border-radius: 6px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    overflow: hidden;
+  }
+
+  .oci-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--oci-border);
+    background: #fff;
+  }
+
+  .oci-card-head h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--oci-ink);
+  }
+
+  .oci-card-body {
+    padding: 16px;
+  }
+
+  /* ---------- 按钮 ---------- */
   .oci-btn {
-    @apply inline-flex items-center justify-center rounded border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    white-space: nowrap;
+  }
+
+  .oci-btn:focus-visible {
+    outline: 2px solid var(--oci-red);
+    outline-offset: 2px;
+  }
+
+  .oci-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .oci-btn-primary {
-    @apply oci-btn border-oracle-red bg-oracle-red text-white hover:border-oracle-redHover hover:bg-oracle-redHover;
+    @apply oci-btn;
+    background: var(--oci-red);
+    border-color: var(--oci-red);
+    color: #fff;
   }
 
+  .oci-btn-primary:hover:not(:disabled) {
+    background: var(--oci-red-dark);
+    border-color: var(--oci-red-dark);
+  }
+
+  /* Redwood 的次按钮是红字描边，而不是灰底 */
   .oci-btn-secondary {
-    @apply oci-btn border-oracle-border bg-white text-oracle-ink hover:bg-oracle-surface;
+    @apply oci-btn;
+    background: #fff;
+    border-color: var(--oci-border-strong);
+    color: var(--oci-red-dark);
+  }
+
+  .oci-btn-secondary:hover:not(:disabled) {
+    border-color: var(--oci-red);
+    background: var(--oci-red-soft);
   }
 
   .oci-btn-danger {
-    @apply oci-btn border-oracle-red bg-white text-oracle-red hover:bg-oracle-red hover:text-white;
+    @apply oci-btn;
+    background: #fff;
+    border-color: var(--oci-red);
+    color: var(--oci-red-dark);
   }
 
+  .oci-btn-danger:hover:not(:disabled) {
+    background: var(--oci-red);
+    color: #fff;
+  }
+
+  .oci-btn-ghost {
+    @apply oci-btn;
+    background: transparent;
+    color: var(--oci-muted);
+  }
+
+  .oci-btn-ghost:hover:not(:disabled) {
+    background: var(--oci-surface);
+    color: var(--oci-ink);
+  }
+
+  /* ---------- 表单 ---------- */
   .oci-input {
-    @apply w-full rounded border border-oracle-border bg-white px-3 py-1.5 text-sm outline-none focus:border-oracle-red;
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--oci-border-strong);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--oci-ink);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  textarea.oci-input {
+    height: auto;
+    padding: 8px 10px;
+  }
+
+  .oci-input:focus {
+    border-color: var(--oci-red);
+    box-shadow: 0 0 0 2px var(--oci-red-soft);
   }
 
   .oci-label {
-    @apply mb-1 block text-xs font-medium text-oracle-muted;
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--oci-ink);
   }
 
+  .oci-hint {
+    display: block;
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--oci-muted);
+  }
+
+  /* ---------- 表格 ---------- */
   .oci-table {
-    @apply w-full border-collapse text-sm;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
   }
 
   .oci-table th {
-    @apply border-b border-oracle-border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-oracle-muted;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--oci-muted);
+    background: var(--oci-surface);
+    border-bottom: 1px solid var(--oci-border);
+    white-space: nowrap;
   }
 
   .oci-table td {
-    @apply border-b border-oracle-border px-3 py-2 align-middle;
+    padding: 11px 14px;
+    border-bottom: 1px solid #eeece9;
+    vertical-align: middle;
+    color: var(--oci-text);
+  }
+
+  .oci-table tbody tr:last-child td {
+    border-bottom: none;
   }
 
   .oci-table tbody tr:hover {
-    @apply bg-oracle-surface;
+    background: #fbfaf9;
   }
+
+  /* ---------- 徽标（带状态圆点） ---------- */
+  .oci-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .oci-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.85;
+  }
+
+  /* ---------- 统计卡片 ---------- */
+  .oci-stat {
+    position: relative;
+    background: #fff;
+    border: 1px solid var(--oci-border);
+    border-radius: 6px;
+    padding: 15px 16px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    overflow: hidden;
+  }
+
+  .oci-stat::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--oci-red);
+    opacity: 0.75;
+  }
+
+  .oci-stat-label {
+    font-size: 12px;
+    color: var(--oci-muted);
+  }
+
+  .oci-stat-value {
+    margin-top: 7px;
+    font-size: 25px;
+    font-weight: 600;
+    color: var(--oci-ink);
+    line-height: 1.15;
+  }
+
+  /* ---------- 提示条 ---------- */
+  .oci-notice {
+    border-radius: 4px;
+    border: 1px solid;
+    padding: 10px 13px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .oci-notice-error {
+    border-color: #f0c4bd;
+    background: #fdf3f1;
+    color: #8e2d1e;
+  }
+
+  .oci-notice-success {
+    border-color: #bbe3cb;
+    background: #f0faf4;
+    color: #136437;
+  }
+
+  .oci-notice-info {
+    border-color: #c9dced;
+    background: #f2f8fd;
+    color: #155a8c;
+  }
+
+  /* ---------- 分段页签 ---------- */
+  .oci-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--oci-border);
+    margin-bottom: 18px;
+  }
+
+  .oci-tab {
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--oci-muted);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    background: transparent;
+  }
+
+  .oci-tab:hover {
+    color: var(--oci-ink);
+  }
+
+  .oci-tab.active {
+    color: var(--oci-red-dark);
+    border-bottom-color: var(--oci-red);
+  }
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d3d0cc;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b9b5b0;
 }

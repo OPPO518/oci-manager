@@ -1,11 +1,38 @@
 # 部署文档：GitHub → VPS → Docker
 
+## 零、一键部署（推荐，只需一条命令）
+
+镜像由 GitHub Actions 预先构建并发布到 GHCR，VPS 上**不需要编译前端和 Go 代码**，
+也不需要 clone 仓库、不需要手动生成密钥、不需要处理目录权限：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh | sudo bash
+```
+
+脚本会自动完成：安装 Docker → 生成随机加密密钥（保存到 `/opt/oci-manager/.env`）→
+写入 compose 配置 → 拉取最新镜像 → 修正 `data` 目录属主 → 启动并做健康检查 →
+打印访问地址。
+
+- 默认 HTTP 端口 `8080`，HTTPS 端口 `443`（映射到容器 `8443`）。
+- **重复执行同一条命令即为升级**：只拉新镜像并重启，不会覆盖 `.env`、数据库和证书。
+- 可用环境变量覆盖：`OCI_MANAGER_REPO` / `OCI_MANAGER_IMAGE` / `OCI_MANAGER_DIR` /
+  `OCI_MANAGER_PORT` / `OCI_MANAGER_HTTPS_PORT`。
+
+脚本成功的前提：GitHub Actions 已跑过一次并产出 `ghcr.io/oppo518/oci-manager:latest`。
+首次推送代码后到仓库的 **Actions** 页确认构建成功（约 5–10 分钟，多架构）。
+若仓库是私有的，VPS 上需先 `docker login ghcr.io`。
+
+> 一键脚本已经包含登录鉴权、HTTPS 端口映射和目录权限修复。下面的章节是
+> 手动部署 / 从源码构建的可选路径，以及排障参考。
+
+---
+
 ## 一、上传到 GitHub
 
 仓库里已经配置好 `.gitignore`，提交的是**源码**，不包含 `node_modules`、构建产物、
-数据库与私钥。前端在 VPS 上构建镜像时现场编译，所以不需要上传依赖。
+数据库与私钥。默认部署走预构建镜像，因此也不需要上传依赖。
 
-当前已跟踪 48 个文件，无需手工挑选。
+当前已跟踪的均为源码文件，无需手工挑选。
 
 ### 1. 在 GitHub 上创建空仓库
 
@@ -103,7 +130,7 @@ cat .env
 
 ```bash
 mkdir -p data
-sudo chown -R 100:100 data     # alpine 中 adduser -S app 默认 uid/gid 为 100
+sudo chown -R 100:101 data     # 实测 alpine:3.24 中 app 的 uid=100、gid=101
 ```
 
 不确定 uid 时先构建一次镜像再查：
@@ -151,8 +178,24 @@ docker image prune -f             # 清理旧镜像，可选
 
 ## 三、安全加固（建议做）
 
-直接把 8080 暴露到公网风险较高——这个面板能开关机、终止实例，
-且目前没有登录鉴权。至少做下面两件事之一。
+面板能开关机、终止实例，虽然已有**登录鉴权 + 可选 Telegram 两步验证**，
+仍建议不要直接把 8080 裸奔在公网。最省事的做法是直接在「设置 → HTTPS 证书」
+里配置证书（见下），或者用下面两种方案之一。
+
+### 内置 HTTPS（Cloudflare DNS-01，推荐）
+
+无需 Nginx、无需 80 端口、无需提前解析域名：
+
+1. 域名的 DNS 托管在 Cloudflare；
+2. 在 Cloudflare 创建 API Token，权限为 `Zone:DNS:Edit` + `Zone:Zone:Read`；
+3. 面板 →「设置 → HTTPS 证书」填域名、邮箱、Token，点「启用 HTTPS」。
+
+服务会自动通过 DNS-01 挑战申请 Let's Encrypt 证书并**热加载生效，无需重启容器**，
+剩余有效期不足 30 天时自动续期。容器内 HTTPS 监听 `8443`（非 root 可绑定高位端口），
+由 compose 映射到宿主机 `443`，因此访问 `https://你的域名` 即可。HTTP 端口始终保留，
+证书配置失败也不会把自己锁在外面。
+
+启用后请放行云厂商安全组的 `443` 端口。
 
 ### 方案 A：只监听本地 + SSH 隧道（最省事，无需域名）
 
@@ -226,10 +269,16 @@ sudo ufw enable
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
-| 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:100 data` 后 `docker compose up -d` |
+| 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:101 data` 后 `docker compose up -d`（一键脚本已自动处理） |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
-| 端口不通 | 检查 `ufw`、云厂商安全组是否放行 8080 |
-| 数据在哪 | `./data/oci-manager.db`，备份整个 `data` 目录即可；不要把 `data/` 提交到 Git |
+| 一键脚本报「拉取失败」 | Actions 还没产出镜像，或仓库为私有。到 Actions 页确认构建成功；私有仓库先 `docker login ghcr.io` |
+| GHCR 拉取很慢 | 配置 Docker 镜像加速；或改用本地构建：`git clone` 后 `docker compose up -d --build` |
+| HTTPS 申请证书失败 | 确认域名 DNS 托管在 Cloudflare、Token 有 `Zone:DNS:Edit` / `Zone:Zone:Read`；国内 VPS 若 DNS 传播检查失败可稍后重试。错误详情会显示在设置页 |
+| 证书已签发但 `https://域名` 打不开 | 放行安全组 443；确认域名已解析到 VPS（DNS-01 不要求申请前解析，但访问时需要） |
+| 容量探测全部显示「状态未知」或报 403 | 该账户无权使用 Compute Capacity Report（需 tenancy 级读取权限）。抢购任务会自动降级为直接创建，也可在「设置 → 抢购策略」关闭预检 |
+| 容量状态显示「有库存」但创建仍失败 | 容量报告是准实时快照，资源可能在两次调用之间被抢走；属正常现象，任务会继续下一轮 |
+| 端口不通 | 检查 `ufw`、云厂商安全组是否放行 8080（HTTP）与 443（HTTPS） |
+| 数据在哪 | `./data/oci-manager.db` 与 `./data/certs/`（证书），备份整个 `data` 目录；不要把 `data/` 提交到 Git |
 
 ## 五、备份
 

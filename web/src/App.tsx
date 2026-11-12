@@ -6,6 +6,7 @@ import { setUnauthorizedHandler } from './lib/api'
 import { AuthProvider, useAuth } from './lib/auth'
 import { AccountProvider } from './lib/context'
 import Accounts from './pages/Accounts'
+import Capacity from './pages/Capacity'
 import Cost from './pages/Cost'
 import Grabber from './pages/Grabber'
 import Instances from './pages/Instances'
@@ -42,6 +43,7 @@ function Shell() {
             <Route path="/" element={<Overview />} />
             <Route path="/instances" element={<Instances />} />
             <Route path="/grabber" element={<Grabber />} />
+            <Route path="/capacity" element={<Capacity />} />
             <Route path="/cost" element={<Cost />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/settings" element={<Settings />} />

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
+  Badge,
   Card,
   EmptyState,
   ErrorBanner,
@@ -31,10 +33,22 @@ const DEFAULT_FORM: GrabTaskInput = {
   max_attempts: 0,
 }
 
+type CapacityPrefill = {
+  shape: string
+  ocpus: number
+  memory_gbs: number
+  ad_name: string
+  region: string
+}
+
 export default function Grabber() {
   const { account, region } = useAccount()
+  const location = useLocation()
   const effectiveRegion = region || undefined
+  const fromCapacity = (location.state as { fromCapacity?: CapacityPrefill } | null)?.fromCapacity
+  const openedFromCapacity = useRef(false)
 
+  const [precheck, setPrecheck] = useState(true)
   const [tasks, setTasks] = useState<GrabTask[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -68,6 +82,47 @@ export default function Grabber() {
   useEffect(() => {
     void loadTasks()
   }, [loadTasks])
+
+  useEffect(() => {
+    api.precheck
+      .get()
+      .then((r) => setPrecheck(r.enabled))
+      .catch(() => {
+        // 忽略：状态仅用于展示
+      })
+  }, [])
+
+  // 从「容量探测」页携带配置跳转过来时，自动打开新建任务表单并预填
+  useEffect(() => {
+    if (!fromCapacity || !account || openedFromCapacity.current) return
+    openedFromCapacity.current = true
+    const nextRegion = fromCapacity.region || account.region
+    setForm({
+      ...DEFAULT_FORM,
+      account_id: account.id,
+      region: nextRegion,
+      compartment_id: account.tenancy_ocid,
+      shape: fromCapacity.shape || DEFAULT_FORM.shape,
+      ocpus: fromCapacity.ocpus || DEFAULT_FORM.ocpus,
+      memory_gbs: fromCapacity.memory_gbs || DEFAULT_FORM.memory_gbs,
+      ad_name: fromCapacity.ad_name || '',
+    })
+    setFormOpen(true)
+    const cid = account.tenancy_ocid
+    void Promise.all([
+      api.resources.compartments(account.id, nextRegion),
+      api.resources.availabilityDomains(account.id, { region: nextRegion, compartment_id: cid }),
+      api.resources.subnets(account.id, { region: nextRegion, compartment_id: cid }),
+      api.resources.images(account.id, { region: nextRegion, compartment_id: cid }),
+    ])
+      .then(([c, a, s, i]) => {
+        setCompartments(c)
+        setAds(a)
+        setSubnets(s)
+        setImages(i)
+      })
+      .catch((err: Error) => setError(err.message))
+  }, [account, fromCapacity])
 
   // 任务运行中时自动刷新列表，让状态与尝试次数保持同步
   const hasRunning = tasks.some((t) => t.status === 'running')
@@ -196,10 +251,24 @@ export default function Grabber() {
           </button>
         }
       >
-        <p className="mb-3 text-xs text-oracle-muted">
-          Always Free 的 Ampere A1 资源常因超售返回「Out of host capacity」。任务会在遇到该错误时按设定间隔持续重试，
-          遇到其他错误（配额、权限、参数）则立即停止。
-        </p>
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <Badge
+            tone={
+              precheck
+                ? 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]'
+                : 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]'
+            }
+          >
+            {precheck ? '抢购前容量预检：已开启' : '抢购前容量预检：已关闭'}
+          </Badge>
+          <span className="text-xs text-oracle-muted">
+            Always Free 的 Ampere A1 常因超售返回「Out of host capacity」。
+            {precheck
+              ? '任务会先用只读接口探测余量，仅在有货时发起创建请求，显著减少写调用。'
+              : '任务会直接尝试创建，遇到容量不足时按间隔持续重试。'}
+            其他错误（配额、权限、参数）立即停止。可在「设置 → 抢购策略」调整。
+          </span>
+        </div>
 
         {loading && tasks.length === 0 ? (
           <Loading />

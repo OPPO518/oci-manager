@@ -1,8 +1,17 @@
 .git
 .github
+.smoke
 data
 *.db
+*.db-journal
 *.pem
+*.key
+.env
+*.mjs
 web/node_modules
 web/dist
+bin/
 README.md
+DEPLOY.md
+install.sh
+_verify/

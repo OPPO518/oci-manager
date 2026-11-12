@@ -15,6 +15,7 @@ import (
 	"github.com/yourname/oci-manager/internal/notify"
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/store"
+	"github.com/yourname/oci-manager/internal/tlsmanager"
 	"github.com/yourname/oci-manager/internal/web"
 )
 
@@ -26,6 +27,7 @@ type Server struct {
 	grabber  *grabber.Manager
 	auth     *auth.Service
 	notify   *notify.Service
+	tlsMgr   *tlsmanager.Manager
 	engine   *gin.Engine
 	staticFS http.FileSystem
 }
@@ -38,10 +40,14 @@ func New(
 	gm *grabber.Manager,
 	authSvc *auth.Service,
 	notifySvc *notify.Service,
+	tlsMgr *tlsmanager.Manager,
 ) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 
-	s := &Server{cfg: cfg, store: st, pool: pool, grabber: gm, auth: authSvc, notify: notifySvc}
+	s := &Server{
+		cfg: cfg, store: st, pool: pool, grabber: gm,
+		auth: authSvc, notify: notifySvc, tlsMgr: tlsMgr,
+	}
 
 	if cfg.WebDir != "" {
 		s.staticFS = http.Dir(cfg.WebDir)
@@ -83,6 +89,11 @@ func (s *Server) registerRoutes() {
 		api.GET("/settings/telegram", s.telegramSettings)
 		api.PUT("/settings/telegram", s.saveTelegramSettings)
 		api.POST("/settings/telegram/test", s.testTelegram)
+		api.GET("/settings/precheck", s.getPrecheck)
+		api.PUT("/settings/precheck", s.savePrecheck)
+		api.GET("/settings/tls", s.getTLS)
+		api.PUT("/settings/tls", s.saveTLS)
+		api.POST("/settings/tls/disable", s.disableTLS)
 
 		api.GET("/accounts", s.listAccounts)
 		api.POST("/accounts", s.createAccount)
@@ -96,6 +107,7 @@ func (s *Server) registerRoutes() {
 		api.GET("/accounts/:id/availability-domains", s.listAvailabilityDomains)
 		api.GET("/accounts/:id/subnets", s.listSubnets)
 		api.GET("/accounts/:id/images", s.listImages)
+		api.POST("/accounts/:id/capacity", s.checkCapacity)
 
 		api.GET("/accounts/:id/instances", s.listInstances)
 		api.POST("/accounts/:id/instances/:instanceId/action", s.instanceAction)

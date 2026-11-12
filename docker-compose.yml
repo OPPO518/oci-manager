@@ -1,20 +1,25 @@
 services:
   oci-manager:
+    # 默认使用 GitHub Actions 预构建的镜像，VPS 上无需现场编译。
+    # 如需本地构建：docker compose up -d --build
+    image: ${OCI_MANAGER_IMAGE:-ghcr.io/oppo518/oci-manager:latest}
     build:
       context: .
       # 国内 VPS 建议保留下方镜像源；海外 VPS 可改成官方源或直接删掉 args 块
       args:
         GOPROXY: https://goproxy.cn,direct
         NPM_REGISTRY: https://registry.npmmirror.com
-    image: oci-manager:latest
     container_name: oci-manager
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${OCI_MANAGER_PORT:-8080}:8080"
+      # HTTPS：容器内使用高位端口 8443（非 root 用户可绑定），映射到宿主机 443
+      - "${OCI_MANAGER_HTTPS_PORT:-443}:8443"
     volumes:
       - ./data:/data
     environment:
       OCI_MANAGER_ADDR: ":8080"
+      OCI_MANAGER_HTTPS_ADDR: ":8443"
       OCI_MANAGER_DB: "/data/oci-manager.db"
       # 用于加密数据库中存储的 OCI API 私钥，取自同目录下的 .env
       # 生成方式：openssl rand -hex 32

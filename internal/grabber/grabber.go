@@ -156,13 +156,16 @@ func (m *Manager) IsRunning(taskID string) bool {
 }
 
 func (m *Manager) loop(ctx context.Context, taskID string) {
+	// precheckAvailable 记录容量报告接口是否可用。首次发现不可用时降级为
+	// 直接创建，并关闭后续预检，避免每轮都白跑一次注定失败的请求。
+	precheckAvailable := true
+
 	for {
 		task, err := m.store.GetGrabTask(taskID)
 		if err != nil {
 			return
 		}
 
-		attempt := task.Attempts + 1
 		clients, err := m.pool.For(task.AccountID, task.Region)
 		if err != nil {
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed, err.Error())
@@ -172,6 +175,30 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			return
 		}
 
+		// ---- 抢购前容量预检 ----
+		// 用只读的 Compute Capacity Report 判断是否有货，只有有货时才发起
+		// LaunchInstance。这样绝大多数轮询不会产生写调用，显著降低风控风险。
+		if precheckAvailable {
+			launch, note := m.capacityPrecheck(ctx, clients, task)
+			_ = m.store.AppendLog(taskID, "info", note)
+			if !launch {
+				interval := task.IntervalSec
+				if interval <= 0 {
+					interval = 60
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Duration(interval) * time.Second):
+				}
+				continue
+			}
+			if strings.Contains(note, "降级") || strings.Contains(note, "预检失败") {
+				precheckAvailable = false
+			}
+		}
+
+		attempt := task.Attempts + 1
 		_ = m.store.AppendLog(taskID, "info", fmt.Sprintf("第 %d 次尝试创建实例", attempt))
 		created, launchErr := m.launchAll(ctx, clients, task)
 
@@ -216,6 +243,55 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 		case <-time.After(time.Duration(interval) * time.Second):
 		}
 	}
+}
+
+// capacityPrecheck 在真正创建实例之前做一次只读容量探测。
+//
+// 返回 shouldLaunch=true 表示可以发起 LaunchInstance；false 表示本轮确认无货，
+// 调用方应直接等待下一轮，不要产生写调用。note 会写进任务日志，方便用户
+// 看清「为什么这次没有尝试创建」。
+//
+// 容量报告接口对部分个人账户不可用（权限或区域限制），此时自动降级为
+// 原来的直接创建逻辑，保证抢购功能不会因此失效。
+func (m *Manager) capacityPrecheck(ctx context.Context, clients *oci.ClientSet, task *store.GrabTask) (bool, string) {
+	value, err := m.store.GetSetting("capacity_precheck")
+	if err == nil && value == "0" {
+		return true, "容量预检已关闭，直接尝试创建实例"
+	}
+
+	account, err := m.store.GetAccount(task.AccountID)
+	if err != nil {
+		return true, "容量预检跳过（读取账号失败），直接尝试创建实例"
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	items, err := oci.CheckCapacity(probeCtx, clients, oci.CapacityQuery{
+		// 容量报告要求以根区间（Tenancy OCID）为作用域。
+		CompartmentID:      account.TenancyOCID,
+		AvailabilityDomain: task.ADName,
+		Shape:              task.Shape,
+		OCPUs:              float32(task.OCPUs),
+		MemoryGBs:          float32(task.MemoryGBs),
+	})
+	if err != nil {
+		if oci.IsCapacityReportUnsupported(err) {
+			return true, "容量报告接口不可用（账户无权限或区域未开放），已降级为直接创建"
+		}
+		return true, "容量预检失败（" + err.Error() + "），本次改为直接创建"
+	}
+
+	if oci.AnyAvailable(items) {
+		return true, fmt.Sprintf("容量预检：%s / %s 有库存，发起创建请求",
+			task.ADName, task.Shape)
+	}
+	status := oci.CapacityUnknown
+	if len(items) > 0 {
+		status = items[0].AvailabilityStatus
+	}
+	return false, fmt.Sprintf("容量预检：%s / %s %s，跳过本次创建请求（未调用 LaunchInstance）",
+		task.ADName, task.Shape, oci.StatusLabel(status))
 }
 
 // launchAll 按任务要求创建指定数量的实例，全部成功才返回 nil。

@@ -2,6 +2,8 @@ import type {
   Account,
   AccountInput,
   AuthStatus,
+  CapacityQueryInput,
+  CapacityResponse,
   Compartment,
   GrabTask,
   GrabTaskInput,
@@ -14,6 +16,8 @@ import type {
   Subnet,
   TelegramSettings,
   TelegramSettingsInput,
+  TLSSettings,
+  TLSSettingsInput,
   TestResult,
   UsagePoint,
 } from './types'
@@ -114,6 +118,25 @@ export const api = {
     test: () => request<{ status: string }>('/settings/telegram/test', { method: 'POST' }),
   },
 
+  precheck: {
+    get: () => request<{ enabled: boolean }>('/settings/precheck'),
+    save: (enabled: boolean) =>
+      request<{ enabled: boolean }>('/settings/precheck', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+  },
+
+  tls: {
+    get: () => request<TLSSettings>('/settings/tls'),
+    save: (body: TLSSettingsInput) =>
+      request<TLSSettings>('/settings/tls', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    disable: () => request<TLSSettings>('/settings/tls/disable', { method: 'POST' }),
+  },
+
   accounts: {
     list: () => request<Account[]>('/accounts'),
     get: (id: string) => request<Account>(`/accounts/${id}`),
@@ -123,6 +146,14 @@ export const api = {
       request<Account>(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     remove: (id: string) => request<void>(`/accounts/${id}`, { method: 'DELETE' }),
     test: (id: string) => request<TestResult>(`/accounts/${id}/test`, { method: 'POST' }),
+  },
+
+  capacity: {
+    check: (accountId: string, body: CapacityQueryInput) =>
+      request<CapacityResponse>(`/accounts/${accountId}/capacity`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
   },
 
   resources: {

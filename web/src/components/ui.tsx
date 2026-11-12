@@ -2,13 +2,13 @@ import type { ReactNode } from 'react'
 
 // 状态徽标：绿色代表运行中，灰色代表已停止，红色代表异常或已终止
 const STATE_STYLES: Record<string, string> = {
-  RUNNING: 'border-green-200 bg-green-50 text-green-700',
-  STOPPED: 'border-gray-200 bg-gray-50 text-gray-600',
-  STOPPING: 'border-amber-200 bg-amber-50 text-amber-700',
-  STARTING: 'border-amber-200 bg-amber-50 text-amber-700',
-  TERMINATED: 'border-red-200 bg-red-50 text-red-700',
-  TERMINATING: 'border-red-200 bg-red-50 text-red-700',
-  PROVISIONING: 'border-blue-200 bg-blue-50 text-blue-700',
+  RUNNING: 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]',
+  STOPPED: 'border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]',
+  STOPPING: 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]',
+  STARTING: 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]',
+  TERMINATED: 'border-[#f0c4bd] bg-[#fdf3f1] text-[#8e2d1e]',
+  TERMINATING: 'border-[#f0c4bd] bg-[#fdf3f1] text-[#8e2d1e]',
+  PROVISIONING: 'border-[#c9dced] bg-[#f2f8fd] text-[#155a8c]',
 }
 
 export function Badge({ children, tone }: { children: ReactNode; tone?: string }) {
@@ -16,23 +16,38 @@ export function Badge({ children, tone }: { children: ReactNode; tone?: string }
     tone ??
     STATE_STYLES[typeof children === 'string' ? children : ''] ??
     'border-oracle-border bg-oracle-surface text-oracle-muted'
-  return (
-    <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${style}`}>
-      {children}
-    </span>
-  )
+  return <span className={`oci-badge ${style}`}>{children}</span>
 }
 
 const TASK_STATUS: Record<string, { label: string; tone: string }> = {
-  idle: { label: '未启动', tone: 'border-gray-200 bg-gray-50 text-gray-600' },
-  running: { label: '运行中', tone: 'border-blue-200 bg-blue-50 text-blue-700' },
-  success: { label: '已成功', tone: 'border-green-200 bg-green-50 text-green-700' },
-  failed: { label: '已失败', tone: 'border-red-200 bg-red-50 text-red-700' },
-  stopped: { label: '已停止', tone: 'border-amber-200 bg-amber-50 text-amber-700' },
+  idle: { label: '未启动', tone: 'border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]' },
+  running: { label: '运行中', tone: 'border-[#c9dced] bg-[#f2f8fd] text-[#155a8c]' },
+  success: { label: '已成功', tone: 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]' },
+  failed: { label: '已失败', tone: 'border-[#f0c4bd] bg-[#fdf3f1] text-[#8e2d1e]' },
+  stopped: { label: '已停止', tone: 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]' },
 }
 
 export function TaskStatusBadge({ status }: { status: string }) {
   const item = TASK_STATUS[status] ?? TASK_STATUS.idle
+  return <Badge tone={item.tone}>{item.label}</Badge>
+}
+
+/** 容量状态徽标：AVAILABLE / OUT_OF_HOST_CAPACITY / HARDWARE_NOT_SUPPORTED */
+const CAPACITY_STATUS: Record<string, { label: string; tone: string }> = {
+  AVAILABLE: { label: '有库存', tone: 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]' },
+  OUT_OF_HOST_CAPACITY: {
+    label: '无库存',
+    tone: 'border-[#f0c4bd] bg-[#fdf3f1] text-[#8e2d1e]',
+  },
+  HARDWARE_NOT_SUPPORTED: {
+    label: '硬件未部署',
+    tone: 'border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]',
+  },
+  UNKNOWN: { label: '状态未知', tone: 'border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]' },
+}
+
+export function CapacityBadge({ status }: { status: string }) {
+  const item = CAPACITY_STATUS[status] ?? CAPACITY_STATUS.UNKNOWN
   return <Badge tone={item.tone}>{item.label}</Badge>
 }
 
@@ -50,12 +65,12 @@ export function Card({
   return (
     <section className={`oci-card ${className}`}>
       {(title || extra) && (
-        <header className="flex items-center justify-between border-b border-oracle-border px-4 py-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
+        <header className="oci-card-head">
+          <h2>{title}</h2>
           {extra}
         </header>
       )}
-      <div className="p-4">{children}</div>
+      <div className="oci-card-body">{children}</div>
     </section>
   )
 }
@@ -80,10 +95,23 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
 
 export function ErrorBanner({ message, onClose }: { message: string; onClose?: () => void }) {
   return (
-    <div className="mb-4 flex items-start justify-between gap-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="oci-notice oci-notice-error mb-4 flex items-start justify-between gap-4">
       <span className="break-all">{message}</span>
       {onClose && (
-        <button type="button" className="shrink-0 text-red-500 hover:text-red-700" onClick={onClose}>
+        <button type="button" className="shrink-0 opacity-70 hover:opacity-100" onClick={onClose}>
+          关闭
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function SuccessBanner({ message, onClose }: { message: string; onClose?: () => void }) {
+  return (
+    <div className="oci-notice oci-notice-success mb-4 flex items-start justify-between gap-4">
+      <span className="break-all">{message}</span>
+      {onClose && (
+        <button type="button" className="shrink-0 opacity-70 hover:opacity-100" onClick={onClose}>
           关闭
         </button>
       )}
@@ -104,14 +132,14 @@ export function Modal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className={`w-full ${width} rounded bg-white shadow-lg`}>
-        <header className="flex items-center justify-between border-b border-oracle-border px-4 py-3">
-          <h3 className="text-sm font-semibold">{title}</h3>
+      <div className={`w-full ${width} oci-card !overflow-visible shadow-xl`}>
+        <header className="oci-card-head">
+          <h2>{title}</h2>
           <button type="button" className="text-oracle-muted hover:text-oracle-ink" onClick={onClose}>
             关闭
           </button>
         </header>
-        <div className="p-4">{children}</div>
+        <div className="oci-card-body">{children}</div>
       </div>
     </div>
   )
@@ -130,16 +158,16 @@ export function Field({
     <label className="block">
       <span className="oci-label">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-oracle-muted">{hint}</span>}
+      {hint && <span className="oci-hint">{hint}</span>}
     </label>
   )
 }
 
 export function Stat({ label, value, unit }: { label: string; value: ReactNode; unit?: string }) {
   return (
-    <div className="oci-card p-4">
-      <p className="text-xs text-oracle-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">
+    <div className="oci-stat">
+      <p className="oci-stat-label">{label}</p>
+      <p className="oci-stat-value">
         {value}
         {unit && <span className="ml-1 text-sm font-normal text-oracle-muted">{unit}</span>}
       </p>

@@ -20,6 +20,8 @@ internal/web/dist/*
 
 # 本地数据与密钥
 data/
+.smoke/
+_verify/
 *.db
 *.db-journal
 *.pem
