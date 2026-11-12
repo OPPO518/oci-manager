@@ -22,6 +22,24 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
 首次推送代码后到仓库的 **Actions** 页确认构建成功（约 5–10 分钟，多架构）。
 若仓库是私有的，VPS 上需先 `docker login ghcr.io`。
 
+### 已有部署如何升级（重要）
+
+如果你之前是用 `git clone` + `docker compose up -d --build` 部署的，
+**不要直接跑默认的一键命令**，否则会在 `/opt/oci-manager` 另起一套空数据库。
+正确做法是把安装目录指到原目录，让脚本复用已有的 `data/`、`.env` 与 compose：
+
+```bash
+cd ~/oci-manager && git pull        # 先更新 compose（新增 GHCR 镜像与 443 映射）
+
+curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh \
+  -o /tmp/oci-install.sh
+sudo OCI_MANAGER_DIR=/root/oci-manager bash /tmp/oci-install.sh
+```
+
+脚本会检测到已有数据库并打印「将完整保留账号、任务与证书」，同时沿用仓库里的
+`docker-compose.yml`，不会覆盖造成 `git pull` 冲突。
+`OCI_MANAGER_DIR` 请换成你实际的克隆目录（用 `pwd` 查看）。
+
 > 一键脚本已经包含登录鉴权、HTTPS 端口映射和目录权限修复。下面的章节是
 > 手动部署 / 从源码构建的可选路径，以及排障参考。
 

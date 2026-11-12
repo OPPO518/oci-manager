@@ -46,7 +46,9 @@ fi
 
 # ---------- 2. 目录与密钥 ----------
 mkdir -p "$DIR/data"
-if [ ! -f "$DIR/.env" ]; then
+if [ -f "$DIR/.env" ]; then
+  info "沿用已有的 .env（不覆盖，避免已保存账号无法解密）"
+else
   KEY="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   cat >"$DIR/.env" <<EOF
 # 用于加密数据库中保存的 OCI API 私钥。请妥善备份，丢失后已录入的账号将无法解密。
@@ -54,11 +56,22 @@ OCI_MANAGER_ENCRYPTION_KEY=$KEY
 EOF
   chmod 600 "$DIR/.env"
   info "已生成加密密钥并保存到 $DIR/.env"
-else
-  info "沿用已有的 .env（不覆盖，避免已保存账号无法解密）"
+fi
+
+if [ -f "$DIR/data/oci-manager.db" ]; then
+  info "检测到已有数据库，本次升级将完整保留账号、任务与证书"
+fi
+
+# 已有 git 仓库时沿用它的 compose 文件，避免覆盖后 git pull 冲突。
+# 该 compose 默认的镜像、端口与脚本一致，可以直接 pull + up。
+REUSE_COMPOSE=0
+if [ -d "$DIR/.git" ] && [ -f "$DIR/docker-compose.yml" ]; then
+  REUSE_COMPOSE=1
+  info "检测到已有仓库，沿用现有 docker-compose.yml"
 fi
 
 # ---------- 3. compose 文件（内嵌，无需再下载） ----------
+if [ "$REUSE_COMPOSE" -eq 0 ]; then
 cat >"$DIR/docker-compose.yml.tpl" <<'EOF'
 services:
   oci-manager:
@@ -88,6 +101,7 @@ sed -e "s|__IMAGE__|$IMAGE|g" \
     -e "s|__HTTPS_PORT__|$HTTPS_PORT|g" \
     "$DIR/docker-compose.yml.tpl" >"$DIR/docker-compose.yml"
 rm -f "$DIR/docker-compose.yml.tpl"
+fi
 
 # ---------- 4. 拉取镜像 ----------
 info "正在拉取镜像 $IMAGE …"
