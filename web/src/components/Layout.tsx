@@ -1,132 +1,36 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useAccount } from '../lib/context'
 import type { Region } from '../lib/types'
+import { Icon, Notice, type IconName } from './ui'
 
-type IconName =
-  | 'overview'
-  | 'compute'
-  | 'grabber'
-  | 'capacity'
-  | 'cost'
-  | 'accounts'
-  | 'settings'
-  | 'menu'
-  | 'search'
-  | 'globe'
-  | 'help'
-  | 'bell'
-  | 'chevron'
-  | 'logout'
+/* ------------------------------------------------------------------
+   页头主操作插槽：页面通过 usePageAction(node) 把主操作放到页头右侧，
+   不改变 App.tsx 的路由结构。
+   ------------------------------------------------------------------ */
+const PageActionContext = createContext<((node: ReactNode) => void) | null>(null)
 
-/** 简化的 Redwood 线性图标，统一 16px。 */
-function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, ReactNode> = {
-    overview: (
-      <>
-        <rect x="2" y="2" width="5" height="5" rx="1" />
-        <rect x="9" y="2" width="5" height="5" rx="1" />
-        <rect x="2" y="9" width="5" height="5" rx="1" />
-        <rect x="9" y="9" width="5" height="5" rx="1" />
-      </>
-    ),
-    compute: (
-      <>
-        <rect x="2" y="3" width="12" height="4" rx="1" />
-        <rect x="2" y="9" width="12" height="4" rx="1" />
-        <circle cx="4.5" cy="5" r="0.7" fill="currentColor" stroke="none" />
-        <circle cx="4.5" cy="11" r="0.7" fill="currentColor" stroke="none" />
-      </>
-    ),
-    grabber: (
-      <>
-        <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
-        <circle cx="8" cy="8" r="3" />
-        <circle cx="8" cy="8" r="0.8" fill="currentColor" stroke="none" />
-      </>
-    ),
-    capacity: (
-      <>
-        <path d="M2 12V7M6 12V4M10 12V9M14 12V2" />
-        <path d="M1 14h14" />
-      </>
-    ),
-    cost: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="M10.5 5.5c-.6-.7-1.5-1-2.5-1-1.4 0-2.5.7-2.5 1.8 0 2.5 5 1.2 5 3.7 0 1.1-1.1 1.9-2.5 1.9-1 0-1.9-.3-2.5-1" />
-        <path d="M8 3v10" />
-      </>
-    ),
-    accounts: (
-      <>
-        <circle cx="8" cy="5.5" r="2.5" />
-        <path d="M2.5 14c0-3 2.5-4.5 5.5-4.5s5.5 1.5 5.5 4.5" />
-      </>
-    ),
-    settings: (
-      <>
-        <circle cx="8" cy="8" r="2.5" />
-        <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" />
-      </>
-    ),
-    menu: <path d="M2 4h12M2 8h12M2 12h12" />,
-    search: (
-      <>
-        <circle cx="7" cy="7" r="4.5" />
-        <path d="M10.5 10.5L14 14" />
-      </>
-    ),
-    globe: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" />
-      </>
-    ),
-    help: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="M6.3 6.2a1.8 1.8 0 013.4.7c0 1.4-1.7 1.6-1.7 3" />
-        <circle cx="8" cy="11.7" r="0.7" fill="currentColor" stroke="none" />
-      </>
-    ),
-    bell: (
-      <>
-        <path d="M4 6a4 4 0 018 0c0 3 1 4 1 4H3s1-1 1-4" />
-        <path d="M6.5 12.5a1.5 1.5 0 003 0" />
-      </>
-    ),
-    chevron: <path d="M4 6l4 4 4-4" />,
-    logout: (
-      <>
-        <path d="M6 2H3v12h3" />
-        <path d="M9 5l3 3-3 3M12 8H6" />
-      </>
-    ),
-  }
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  )
+export function usePageAction(node: ReactNode) {
+  const setAction = useContext(PageActionContext)
+  useEffect(() => {
+    if (!setAction) return
+    setAction(node)
+    return () => setAction(null)
+  }, [setAction, node])
 }
 
-const NAV_GROUPS: {
-  group: string
-  items: { to: string; label: string; icon: IconName }[]
-}[] = [
+type NavItem = { to: string; label: string; icon: IconName }
+
+const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
   {
     group: '概览',
     items: [{ to: '/', label: '总览', icon: 'overview' }],
@@ -193,14 +97,43 @@ const PAGE_META: Record<string, { title: string; desc: string; group: string }> 
 // 这些页面即使还没有账号也必须可用，否则无法完成初始配置
 const NO_ACCOUNT_REQUIRED = new Set(['/accounts', '/settings'])
 
+/* ------------------------------------------------------------------
+   全局服务菜单 tray：条目全部映射到现有 7 条路由，不造不存在的路由。
+   ------------------------------------------------------------------ */
+const ALL_SERVICES: NavItem[] = [
+  { to: '/', label: '总览', icon: 'overview' },
+  { to: '/instances', label: '实例', icon: 'compute' },
+  { to: '/grabber', label: 'ARM 抢购', icon: 'grabber' },
+  { to: '/capacity', label: '容量探测', icon: 'capacity' },
+  { to: '/cost', label: '成本与用量', icon: 'cost' },
+  { to: '/accounts', label: '账号', icon: 'accounts' },
+  { to: '/settings', label: '设置', icon: 'settings' },
+]
+
+const PINNED: NavItem[] = [ALL_SERVICES[0], ALL_SERVICES[1]]
+const RECENT: NavItem[] = [ALL_SERVICES[4], ALL_SERVICES[5], ALL_SERVICES[3]]
+
+const TRAY_GROUPS: { group: string; icon: IconName; items: NavItem[] }[] = [
+  { group: 'Compute', icon: 'compute', items: [ALL_SERVICES[1], ALL_SERVICES[2], ALL_SERVICES[3]] },
+  { group: 'Storage', icon: 'storage', items: [] },
+  { group: 'Networking', icon: 'network', items: [] },
+  { group: 'Database', icon: 'database', items: [] },
+  { group: 'Identity & Security', icon: 'shield', items: [ALL_SERVICES[5], ALL_SERVICES[6]] },
+  { group: 'Observability & Management', icon: 'eye', items: [ALL_SERVICES[4]] },
+]
+
 export function Layout({ children }: { children: ReactNode }) {
   const { accounts, account, selectAccount, region, setRegion } = useAccount()
   const { username, logout } = useAuth()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const [regions, setRegions] = useState<Region[]>([])
-  const [collapsed, setCollapsed] = useState(false)
+  const [trayOpen, setTrayOpen] = useState(false)
+  const [trayQuery, setTrayQuery] = useState('')
+  const [globalSearch, setGlobalSearch] = useState('')
   const [userMenu, setUserMenu] = useState(false)
+  const [action, setAction] = useState<ReactNode>(null)
+  const setActionStable = useCallback((node: ReactNode) => setAction(node), [])
 
   useEffect(() => {
     if (!account) {
@@ -221,183 +154,332 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }, [account])
 
+  // 明文 HTTP 且非本机访问时，禁止录入真实凭证的醒目警告
+  const [insecure] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const host = window.location.hostname
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '::1'
+    return window.location.protocol === 'http:' && !local
+  })
+
   const effectiveRegion = region || account?.region || ''
   const meta = PAGE_META[pathname] ?? PAGE_META['/']
   const needAccount = !account && !NO_ACCOUNT_REQUIRED.has(pathname)
 
+  const trayQueryTrimmed = trayQuery.trim().toLowerCase()
+  const searchResults = trayQueryTrimmed
+    ? ALL_SERVICES.filter(
+        (s) => s.label.toLowerCase().includes(trayQueryTrimmed) || s.to.includes(trayQueryTrimmed),
+      )
+    : []
+
+  const renderTrayLink = (item: NavItem) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.to === '/'}
+      className="oci-tray-link"
+      onClick={() => setTrayOpen(false)}
+    >
+      <Icon name={item.icon} size={16} />
+      <span>{item.label}</span>
+    </NavLink>
+  )
+
   return (
-    <div className="min-h-full">
-      {/* ---------- 全局顶栏 ---------- */}
-      <header className="oci-topbar">
-        <button
-          type="button"
-          className="oci-topbar-icon"
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? '展开导航' : '收起导航'}
-        >
-          <Icon name="menu" size={18} />
-        </button>
+    <PageActionContext.Provider value={setActionStable}>
+      <div className="min-h-full">
+        {/* ---------- 全局顶栏（56px） ---------- */}
+        <header className="oci-topbar">
+          <button
+            type="button"
+            className="oci-topbar-icon"
+            onClick={() => setTrayOpen((v) => !v)}
+            title="打开全局服务菜单"
+            aria-label="打开全局服务菜单"
+            aria-expanded={trayOpen}
+          >
+            <Icon name="menu" size={18} />
+          </button>
 
-        <div className="oci-brand">
-          <span className="oci-brand-mark" />
-          <span>Oracle Cloud</span>
-        </div>
-        <span className="oci-brand-divider" />
-        <span className="hidden text-[13px] text-white/70 sm:inline">OCI 管理器</span>
+          <div className="oci-brand">
+            <span className="oci-wordmark">ORACLE</span>
+            <span className="oci-brand-divider" />
+            <span className="oci-brand-label">Oracle Cloud</span>
+          </div>
+          <span className="hidden text-[13px] text-white/70 lg:inline">OCI 管理器</span>
 
-        <div className="oci-topbar-search ml-2 hidden lg:flex">
-          <Icon name="search" size={14} />
-          <span>搜索资源、服务和文档</span>
-        </div>
+          {/* 真输入框：界面演示，不假装能全局检索、不抛错 */}
+          <div className="oci-topbar-search ml-2 hidden lg:flex">
+            <span className="oci-topbar-search-icon">
+              <Icon name="search" size={14} />
+            </span>
+            <input
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Search resources, services, and documentation"
+              aria-label="搜索资源、服务和文档（界面演示，暂不支持全局检索）"
+            />
+          </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="hidden items-center gap-1.5 md:flex">
-            <Icon name="globe" size={14} />
+          <div className="ml-auto flex items-center gap-1.5">
+            <div className="hidden items-center gap-1.5 md:flex">
+              <Icon name="globe" size={14} />
+              <select
+                className="oci-topbar-select"
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                title="区域"
+                aria-label="区域"
+              >
+                <option value="">区域：{account?.region ?? '未选择'}</option>
+                {regions.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                    {r.is_home_region ? '（主区域）' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <select
-              className="oci-topbar-select"
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              title="区域"
+              className="oci-topbar-select hidden max-w-[190px] sm:block"
+              value={account?.id ?? ''}
+              onChange={(e) => selectAccount(e.target.value)}
+              title="账号"
+              aria-label="账号"
             >
-              <option value="">区域：{account?.region ?? '未选择'}</option>
-              {regions.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {r.name}
-                  {r.is_home_region ? '（主区域）' : ''}
+              {accounts.length === 0 && <option value="">暂无账号</option>}
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.proxy_url ? '（代理）' : ''}
                 </option>
               ))}
             </select>
-          </div>
 
-          <select
-            className="oci-topbar-select hidden max-w-[190px] sm:block"
-            value={account?.id ?? ''}
-            onChange={(e) => selectAccount(e.target.value)}
-            title="账号"
-          >
-            {accounts.length === 0 && <option value="">暂无账号</option>}
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.proxy_url ? '（代理）' : ''}
-              </option>
-            ))}
-          </select>
+            <span className="mx-1 hidden h-6 w-px bg-white/20 md:block" />
 
-          <button type="button" className="oci-topbar-icon hidden sm:inline-flex" title="帮助">
-            <Icon name="help" size={16} />
-          </button>
-          <button type="button" className="oci-topbar-icon hidden sm:inline-flex" title="通知">
-            <Icon name="bell" size={16} />
-          </button>
-
-          <div className="relative">
+            {/* OCI 图标序列：展示性占位，hover 半透明白 */}
             <button
               type="button"
-              className="flex items-center gap-1.5 rounded px-1.5 py-1 hover:bg-white/10"
-              onClick={() => setUserMenu((v) => !v)}
-              title="用户菜单"
+              className="oci-topbar-icon hidden md:inline-flex"
+              title="Announcements（界面演示）"
+              aria-label="Announcements（界面演示）"
             >
-              <span className="oci-avatar">{username ? username.slice(0, 1).toUpperCase() : 'U'}</span>
-              <span className="hidden text-xs text-white/85 sm:inline">{username}</span>
-              <Icon name="chevron" size={12} />
+              <Icon name="announcement" size={18} />
             </button>
-            {userMenu && (
-              <div
-                className="absolute right-0 top-10 z-50 w-44 overflow-hidden rounded border border-oracle-border bg-white py-1 shadow-lg"
-                onMouseLeave={() => setUserMenu(false)}
-              >
-                <button
-                  type="button"
-                  className="block w-full px-3 py-2 text-left text-[13px] hover:bg-oracle-surface"
-                  onClick={() => {
-                    setUserMenu(false)
-                    navigate('/settings')
-                  }}
-                >
-                  设置
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-oracle-redHover hover:bg-oracle-redSoft"
-                  onClick={() => {
-                    setUserMenu(false)
-                    void logout()
-                  }}
-                >
-                  <Icon name="logout" size={14} />
-                  退出登录
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+            <button
+              type="button"
+              className="oci-topbar-icon hidden sm:inline-flex"
+              title="Help（界面演示）"
+              aria-label="Help（界面演示）"
+            >
+              <Icon name="help" size={18} />
+            </button>
+            <button
+              type="button"
+              className="oci-topbar-icon hidden sm:inline-flex"
+              title="Cloud Shell（界面演示）"
+              aria-label="Cloud Shell（界面演示）"
+            >
+              <Icon name="terminal" size={18} />
+            </button>
+            <button
+              type="button"
+              className="oci-topbar-icon"
+              title="Notifications（界面演示）"
+              aria-label="Notifications（界面演示）"
+            >
+              <Icon name="bell" size={18} />
+            </button>
 
-      <div className="flex min-h-[calc(100vh-48px)]">
-        {/* ---------- 侧栏 ---------- */}
-        <aside className={`oci-sidebar ${collapsed ? '!w-[56px]' : ''}`}>
-          {NAV_GROUPS.map((section) => (
-            <div key={section.group}>
-              {!collapsed && <div className="oci-sidebar-title">{section.group}</div>}
-              {section.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === '/'}
-                  title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `oci-nav-item ${isActive ? 'active' : ''} ${collapsed ? 'justify-center !px-0' : ''}`
-                  }
+            {/* Profile 头像下拉：保留设置与退出登录 */}
+            <div className="relative">
+              <button
+                type="button"
+                className="oci-user-trigger"
+                onClick={() => setUserMenu((v) => !v)}
+                title="用户菜单"
+                aria-label="用户菜单"
+                aria-expanded={userMenu}
+              >
+                <span className="oci-avatar">
+                  {username ? username.slice(0, 1).toUpperCase() : 'U'}
+                </span>
+                <span className="hidden text-[13px] text-white/90 sm:inline">{username}</span>
+                <Icon name="chevron" size={12} />
+              </button>
+              {userMenu && (
+                <div
+                  className="oci-user-menu"
+                  onMouseLeave={() => setUserMenu(false)}
                 >
-                  <Icon name={item.icon} />
-                  {!collapsed && <span>{item.label}</span>}
-                </NavLink>
-              ))}
+                  <div className="px-3.5 py-2 text-[12px] text-oracle-muted">
+                    当前用户：{username || '—'}
+                  </div>
+                  <div className="oci-user-menu-sep" />
+                  <button
+                    type="button"
+                    className="oci-user-menu-item"
+                    onClick={() => {
+                      setUserMenu(false)
+                      navigate('/settings')
+                    }}
+                  >
+                    <Icon name="settings" size={15} />
+                    设置
+                  </button>
+                  <button
+                    type="button"
+                    className="oci-user-menu-item is-danger"
+                    onClick={() => {
+                      setUserMenu(false)
+                      void logout()
+                    }}
+                  >
+                    <Icon name="logout" size={15} />
+                    退出登录
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
-          {!collapsed && (
-            <div className="mt-auto border-t border-oracle-border px-5 py-3 text-[11px] leading-relaxed text-oracle-muted">
+          </div>
+        </header>
+
+        {/* ---------- 全局服务菜单 tray ---------- */}
+        {trayOpen && (
+          <div className="oci-tray-overlay">
+            <div className="oci-tray-backdrop" onClick={() => setTrayOpen(false)} />
+            <div className="oci-tray">
+              <div className="oci-tray-head">
+                <div className="oci-tray-title">Global navigation</div>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-oracle-muted">
+                    <Icon name="search" size={14} />
+                  </span>
+                  <input
+                    className="oci-input pl-9"
+                    placeholder="Search services"
+                    aria-label="搜索服务"
+                    value={trayQuery}
+                    onChange={(e) => setTrayQuery(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="oci-tray-body">
+                {trayQueryTrimmed ? (
+                  <>
+                    <div className="oci-tray-section-title">Search results</div>
+                    {searchResults.length > 0 ? (
+                      searchResults.map(renderTrayLink)
+                    ) : (
+                      <span className="oci-tray-empty">No services found.</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="oci-tray-section-title">Pinned</div>
+                    {PINNED.map(renderTrayLink)}
+                    <div className="oci-tray-section-title">Recently visited</div>
+                    {RECENT.map(renderTrayLink)}
+                    {TRAY_GROUPS.map((g) => (
+                      <div key={g.group}>
+                        <div className="oci-tray-section-title">
+                          <span className="inline-flex items-center gap-2">
+                            <Icon name={g.icon} size={14} />
+                            {g.group}
+                          </span>
+                        </div>
+                        {g.items.length > 0 ? (
+                          g.items.map(renderTrayLink)
+                        ) : (
+                          <span className="oci-tray-empty">本演示未接入该服务</span>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex min-h-[calc(100vh-var(--rw-topbar-h))]">
+          {/* ---------- 服务页内持久侧栏（248px） ---------- */}
+          <aside className="oci-sidebar">
+            <div className="oci-sidebar-title">服务导航</div>
+            {NAV_GROUPS.map((section) => (
+              <div key={section.group}>
+                <div className="oci-sidebar-title">{section.group}</div>
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) => `oci-nav-item ${isActive ? 'active' : ''}`}
+                  >
+                    <Icon name={item.icon} />
+                    <span>{item.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+            <div className="mt-auto border-t border-oracle-border px-4 py-3 text-[12px] leading-relaxed text-oracle-muted">
               OCI 管理器
               <br />
               当前区域：{effectiveRegion || '未选择'}
             </div>
-          )}
-        </aside>
+          </aside>
 
-        {/* ---------- 内容区 ---------- */}
-        <main className="oci-content">
-          <nav className="oci-breadcrumb">
-            <span>Oracle Cloud</span>
-            <span className="text-oracle-borderStrong">/</span>
-            <span>{meta.group}</span>
-            <span className="text-oracle-borderStrong">/</span>
-            <span className="font-medium text-oracle-ink">{meta.title}</span>
-          </nav>
+          {/* ---------- 内容区 ---------- */}
+          <main className="oci-content">
+            <nav className="oci-breadcrumb">
+              <Link to="/">Oracle Cloud</Link>
+              <span>/</span>
+              <span>{meta.group}</span>
+              <span>/</span>
+              <span className="font-medium text-oracle-ink">{meta.title}</span>
+            </nav>
 
-          <div className="oci-page-header">
-            <div>
-              <h1 className="oci-page-title">{meta.title}</h1>
-              <p className="oci-page-desc">{meta.desc}</p>
+            {/* 明文 HTTP 安全提示 */}
+            {insecure && (
+              <div className="oci-security-banner">
+                <Icon name="warning" />
+                <div>
+                  当前为明文 HTTP 连接，请勿录入真实 OCI 凭证；请先在「设置 → HTTPS 证书」启用 HTTPS。
+                </div>
+              </div>
+            )}
+
+            <div className="oci-page-header">
+              <div>
+                <h1 className="oci-page-title">{meta.title}</h1>
+                <p className="oci-page-desc">{meta.desc}</p>
+              </div>
+              {action && <div className="oci-page-actions">{action}</div>}
             </div>
-          </div>
 
-          {needAccount ? (
-            <div className="oci-notice oci-notice-info flex items-center justify-between gap-4">
-              <span>还没有配置 OCI 账号。请先添加 API 凭证，之后即可查看资源与执行操作。</span>
-              <button
-                type="button"
-                className="oci-btn-secondary shrink-0"
-                onClick={() => navigate('/accounts')}
-              >
-                前往账号设置
-              </button>
-            </div>
-          ) : (
-            children
-          )}
-        </main>
+            {needAccount ? (
+              <Notice tone="info">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <span>还没有配置 OCI 账号。请先添加 API 凭证，之后即可查看资源与执行操作。</span>
+                  <button
+                    type="button"
+                    className="oci-btn-secondary shrink-0"
+                    onClick={() => navigate('/accounts')}
+                  >
+                    前往账号设置
+                  </button>
+                </div>
+              </Notice>
+            ) : (
+              children
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </PageActionContext.Provider>
   )
 }

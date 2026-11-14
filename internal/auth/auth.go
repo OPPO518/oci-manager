@@ -119,7 +119,7 @@ func (s *Service) Setup(username, password string) error {
 // Login 校验用户名密码。开启两步验证时创建挑战并推送验证码，不直接发放会话。
 func (s *Service) Login(username, password, clientIP string) (LoginResult, error) {
 	username = normalizeUsername(username)
-	if locked := s.checkLocked(username); locked {
+	if locked := s.checkLocked(username, clientIP); locked {
 		return LoginResult{}, errors.New("登录失败次数过多，请 15 分钟后重试")
 	}
 
@@ -131,14 +131,14 @@ func (s *Service) Login(username, password, clientIP string) (LoginResult, error
 		return LoginResult{}, errors.New("尚未设置管理员账号")
 	}
 	if admin.Username != username {
-		s.recordFailure(username)
+		s.recordFailure(username, clientIP)
 		return LoginResult{}, errors.New("用户名或密码错误")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
-		s.recordFailure(username)
+		s.recordFailure(username, clientIP)
 		return LoginResult{}, errors.New("用户名或密码错误")
 	}
-	s.clearFailures(username)
+	s.clearFailures(username, clientIP)
 
 	// 未开启两步验证：直接发放会话
 	if s.notify == nil || !s.notify.LoginOTPEnabled() {
@@ -191,7 +191,14 @@ func (s *Service) VerifyOTP(challenge, code, clientIP string) (string, string, e
 		_ = s.store.BumpChallengeAttempts(challenge)
 		return "", "", errors.New("验证码不正确")
 	}
-	_ = s.store.DeleteChallenge(challenge)
+	// 原子消费挑战：并发请求里只有一个能删到这条记录，杜绝一个验证码换多张会话。
+	consumed, err := s.store.ConsumeChallenge(challenge)
+	if err != nil {
+		return "", "", err
+	}
+	if !consumed {
+		return "", "", errors.New("验证已失效，请重新登录")
+	}
 
 	token, err := randomToken()
 	if err != nil {
@@ -256,7 +263,15 @@ func (s *Service) ChangePassword(username, oldPassword, newPassword string) erro
 	if err != nil {
 		return err
 	}
-	return s.store.UpdateAdminPassword(string(hash))
+	if err := s.store.UpdateAdminPassword(string(hash)); err != nil {
+		return err
+	}
+	// 改密码后立即撤销所有既有会话：否则已泄露的旧 Cookie 还能继续读取账号与私钥。
+	if err := s.store.DeleteAllSessions(); err != nil {
+		return fmt.Errorf("密码已更新，但撤销旧会话失败: %w", err)
+	}
+	log.Printf("管理员密码已修改，已撤销全部既有会话")
+	return nil
 }
 
 // Cleanup 定期清理过期会话与挑战，返回是否出错。
@@ -285,36 +300,63 @@ func (s *Service) notifyLogin(username, clientIP string, withOTP bool) {
 	}
 }
 
-func (s *Service) checkLocked(username string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.failures[username]
-	if !ok {
-		return false
+// failureKeys 同时按用户名和来源 IP 计数：只按用户名会让分布式慢速爆破
+// 绕过锁定，只按 IP 又挡不住同一 IP 换用户名试探。
+func failureKeys(username, clientIP string) []string {
+	keys := []string{"u:" + username}
+	if clientIP != "" {
+		keys = append(keys, "ip:"+clientIP)
 	}
-	return time.Now().Before(rec.lockedUntil)
+	return keys
 }
 
-func (s *Service) recordFailure(username string) {
+func (s *Service) checkLocked(username, clientIP string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, ok := s.failures[username]
-	if !ok || time.Since(rec.lastFail) > loginFailureWindow {
-		rec = &failureRecord{}
-		s.failures[username] = rec
+	for _, key := range failureKeys(username, clientIP) {
+		if rec, ok := s.failures[key]; ok && time.Now().Before(rec.lockedUntil) {
+			return true
+		}
 	}
-	rec.count++
-	rec.lastFail = time.Now()
-	if rec.count >= maxLoginFailures {
-		rec.lockedUntil = time.Now().Add(loginLockout)
-		log.Printf("账号 %s 登录失败次数过多，已临时锁定", username)
+	return false
+}
+
+func (s *Service) recordFailure(username, clientIP string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 随机用户名刷接口会无限增长内存，超过上限先清理过期项，仍超限就整体重置。
+	if len(s.failures) > 4096 {
+		now := time.Now()
+		for k, rec := range s.failures {
+			if now.Sub(rec.lastFail) > loginFailureWindow && now.After(rec.lockedUntil) {
+				delete(s.failures, k)
+			}
+		}
+		if len(s.failures) > 4096 {
+			s.failures = map[string]*failureRecord{}
+		}
+	}
+	for _, key := range failureKeys(username, clientIP) {
+		rec, ok := s.failures[key]
+		if !ok || time.Since(rec.lastFail) > loginFailureWindow {
+			rec = &failureRecord{}
+			s.failures[key] = rec
+		}
+		rec.count++
+		rec.lastFail = time.Now()
+		if rec.count >= maxLoginFailures {
+			rec.lockedUntil = time.Now().Add(loginLockout)
+			log.Printf("登录失败次数过多，已临时锁定 %s", key)
+		}
 	}
 }
 
-func (s *Service) clearFailures(username string) {
+func (s *Service) clearFailures(username, clientIP string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.failures, username)
+	for _, key := range failureKeys(username, clientIP) {
+		delete(s.failures, key)
+	}
 }
 
 func validateCredentials(username, password string) error {

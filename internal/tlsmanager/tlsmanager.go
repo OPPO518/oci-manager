@@ -160,7 +160,15 @@ func (m *Manager) HasCertificate() bool { return m.current.Load() != nil }
 // TLSConfig 构造用于 HTTPS 监听的 tls.Config。
 func (m *Manager) TLSConfig() *tls.Config {
 	return &tls.Config{
-		MinVersion:     tls.VersionTLS12,
+		MinVersion: tls.VersionTLS12,
+		// 只允许 ECDHE + AEAD 套件，排除 TLS 1.2 下可能协商到的 CBC / 静态 RSA 套件。
+		// TLS 1.3 使用固定的安全套件，不受此列表影响。
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		},
 		GetCertificate: m.GetCertificate,
 	}
 }
@@ -438,6 +446,6 @@ type acmeUser struct {
 	key          *rsa.PrivateKey
 }
 
-func (u *acmeUser) GetEmail() string                            { return u.Email }
-func (u *acmeUser) GetRegistration() *registration.Resource    { return u.registration }
-func (u *acmeUser) GetPrivateKey() crypto.PrivateKey           { return u.key }
+func (u *acmeUser) GetEmail() string                        { return u.Email }
+func (u *acmeUser) GetRegistration() *registration.Resource { return u.registration }
+func (u *acmeUser) GetPrivateKey() crypto.PrivateKey        { return u.key }

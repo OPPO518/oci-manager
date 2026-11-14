@@ -5,7 +5,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"os"
 )
 
@@ -22,42 +22,51 @@ type Config struct {
 	EncryptionKey []byte
 	// WebDir 是前端静态资源目录。为空时使用内嵌资源。
 	WebDir string
-	// WarnDevelopmentKey 为 true 表示未设置加密密钥、正在使用默认开发密钥。
-	WarnDevelopmentKey bool
+	// AllowInsecureHTTP 为 true 时，即使证书已签发也不把 HTTP 跳转到 HTTPS。
+	// 仅用于排障或反代已终结 TLS 的场景；开启后登录密码、OTP 与 OCI 私钥
+	// 会重新暴露在明文 HTTP 下。
+	AllowInsecureHTTP bool
+	// PublicHTTPSPort 是浏览器访问 HTTPS 的端口，用于构造跳转地址。
+	// 默认 443；若 compose 把容器 8443 映射到宿主机其他端口需同步设置。
+	PublicHTTPSPort string
 }
 
 const (
-	envAddr          = "OCI_MANAGER_ADDR"
-	envHTTPSAddr     = "OCI_MANAGER_HTTPS_ADDR"
-	envDBPath        = "OCI_MANAGER_DB"
-	envEncryptionKey = "OCI_MANAGER_ENCRYPTION_KEY"
-	envWebDir        = "OCI_MANAGER_WEB_DIR"
+	envAddr              = "OCI_MANAGER_ADDR"
+	envHTTPSAddr         = "OCI_MANAGER_HTTPS_ADDR"
+	envDBPath            = "OCI_MANAGER_DB"
+	envEncryptionKey     = "OCI_MANAGER_ENCRYPTION_KEY"
+	envWebDir            = "OCI_MANAGER_WEB_DIR"
+	envAllowInsecureHTTP = "OCI_MANAGER_ALLOW_HTTP"
+	envPublicHTTPSPort   = "OCI_MANAGER_PUBLIC_HTTPS_PORT"
 )
 
-// Load 从环境变量读取配置，缺失项使用默认值。
-// EncryptionKey 允许传入任意长度的字符串，内部会做 SHA-256 归一化到 32 字节；
-// 未设置时使用固定的开发用默认值，并明确提示不要用于生产环境。
+// Load 从环境变量读取配置。
+//
+// 加密密钥是唯一能解出数据库中 OCI 私钥的凭据，绝不能留空或回退到
+// 写在源码里的默认值——那等于把私钥明文公开。缺失或过短时直接拒绝启动。
 func Load() (*Config, error) {
 	cfg := &Config{
-		Addr:      envOrDefault(envAddr, ":8080"),
-		HTTPSAddr: envOrDefault(envHTTPSAddr, ":8443"),
-		DBPath:    envOrDefault(envDBPath, "./data/oci-manager.db"),
-		WebDir: os.Getenv(envWebDir),
+		Addr:              envOrDefault(envAddr, ":8080"),
+		HTTPSAddr:         envOrDefault(envHTTPSAddr, ":8443"),
+		DBPath:            envOrDefault(envDBPath, "./data/oci-manager.db"),
+		WebDir:            os.Getenv(envWebDir),
+		AllowInsecureHTTP: os.Getenv(envAllowInsecureHTTP) == "true" || os.Getenv(envAllowInsecureHTTP) == "1",
+		PublicHTTPSPort:   envOrDefault(envPublicHTTPSPort, "443"),
 	}
 
 	raw := os.Getenv(envEncryptionKey)
 	if raw == "" {
-		raw = "oci-manager-development-key"
-		cfg.WarnDevelopmentKey = true
+		return nil, errors.New("缺少 OCI_MANAGER_ENCRYPTION_KEY：请用 openssl rand -hex 32 生成随机密钥并写入 .env；该密钥用于加密 OCI API 私钥，不能留空")
+	}
+	if len(raw) < 32 {
+		return nil, errors.New("OCI_MANAGER_ENCRYPTION_KEY 过短（至少 32 个字符），请用 openssl rand -hex 32 重新生成")
 	}
 	sum := sha256.Sum256([]byte(raw))
 	cfg.EncryptionKey = sum[:]
 
 	return cfg, nil
 }
-
-// WarnDevelopmentKey 为 true 表示正在使用默认加密密钥。
-var _ = fmt.Sprintf
 
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -67,6 +76,7 @@ func envOrDefault(key, fallback string) string {
 }
 
 // KeyFingerprintHex 返回加密密钥的十六进制摘要，用于启动日志中的自检展示。
+// 只展示前 8 字节，不会泄露密钥本身。
 func (c *Config) KeyFingerprintHex() string {
 	sum := sha256.Sum256(c.EncryptionKey)
 	return hex.EncodeToString(sum[:8])

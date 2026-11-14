@@ -124,10 +124,11 @@ func (s *Server) testAccount(c *gin.Context) {
 	}
 
 	respondOK(c, gin.H{
-		"tenancy_name":  name,
-		"region":        account.Region,
-		"proxy_url":     account.ProxyURL,
-		"region_count":  len(regions),
-		"latency_ms":    time.Since(start).Milliseconds(),
+		"tenancy_name": name,
+		"region":       account.Region,
+		// 诊断结果不需要回显代理账号密码，只展示 host:port。
+		"proxy_url":    redactProxyURL(account.ProxyURL),
+		"region_count": len(regions),
+		"latency_ms":   time.Since(start).Milliseconds(),
 	})
 }

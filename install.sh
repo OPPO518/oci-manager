@@ -128,6 +128,7 @@ services:
       OCI_MANAGER_ADDR: ":8080"
       OCI_MANAGER_HTTPS_ADDR: ":8443"
       OCI_MANAGER_DB: "/data/oci-manager.db"
+      OCI_MANAGER_PUBLIC_HTTPS_PORT: "__HTTPS_PORT__"
       OCI_MANAGER_ENCRYPTION_KEY: ${OCI_MANAGER_ENCRYPTION_KEY:?请先在 .env 中设置 OCI_MANAGER_ENCRYPTION_KEY}
     healthcheck:
       # GET 探测：--spider 发 HEAD，/api/health 只注册了 GET，会被判 404
@@ -162,7 +163,8 @@ GID_VAL="$(printf '%s' "$GID_VAL" | tr -cd '0-9')"
 [ -n "$UID_VAL" ] || UID_VAL=100
 [ -n "$GID_VAL" ] || GID_VAL=101
 chown -R "${UID_VAL}:${GID_VAL}" "$DIR/data"
-info "数据目录属主已设为 ${UID_VAL}:${GID_VAL}"
+chmod 700 "$DIR/data"
+info "数据目录属主已设为 ${UID_VAL}:${GID_VAL}，权限收紧为 700"
 
 # ---------- 6. 端口预检 ----------
 # 升级时端口由本项目旧容器占着属于正常情况（compose up 会重建容器），只拦首次安装。
@@ -280,9 +282,11 @@ $(printf '\033[0m')
     cd ${DIR} && ${COMPOSE} restart         重启
     curl -fsSL .../install.sh | sudo bash    再次执行即为升级
 
-  首次打开请设置管理员账号，然后在「账号」页录入 OCI API 凭证。
-  安全提示：请放行云厂商安全组的 ${HTTP_PORT} 与 ${HTTPS_PORT} 端口，
-            并尽快在「设置」里启用 Telegram 两步验证。
+  首次打开请设置管理员账号，然后先到「设置 → HTTPS 证书」配置证书。
+  注意：当前是明文 HTTP，在启用 HTTPS 之前请勿录入真实 OCI API 凭证，
+        否则登录密码、两步验证码与 RSA 私钥可能被同网络路径上的中间人截获。
+        证书签发后 HTTP 会自动跳转到 HTTPS（本机健康检查除外）。
+  请放行云厂商安全组的 ${HTTPS_PORT} 端口，并尽快启用 Telegram 两步验证。
 EOF
 
 if [ "$HTTPS_PORT" != "443" ]; then

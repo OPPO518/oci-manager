@@ -30,6 +30,7 @@ type Server struct {
 	tlsMgr   *tlsmanager.Manager
 	engine   *gin.Engine
 	staticFS http.FileSystem
+	limiter  *ipRateLimiter
 }
 
 // New 构造 HTTP 服务。
@@ -60,7 +61,10 @@ func New(
 	}
 
 	s.engine = gin.New()
-	s.engine.Use(gin.Logger(), gin.Recovery())
+	// 不信任任何 X-Forwarded-For：否则攻击者可伪造来源 IP，绕过登录锁定与限流。
+	_ = s.engine.SetTrustedProxies(nil)
+	s.engine.Use(gin.Logger(), gin.Recovery(), s.securityHeaders())
+	s.limiter = newIPRateLimiter()
 	s.registerRoutes()
 	return s, nil
 }
@@ -187,7 +191,7 @@ func respondError(c *gin.Context, err error) {
 	default:
 		status = http.StatusBadRequest
 	}
-	c.JSON(status, gin.H{"error": err.Error()})
+	c.JSON(status, gin.H{"error": sanitizeError(err.Error())})
 }
 
 // isAuthError 粗略判断凭证类错误，便于前端给出明确提示。

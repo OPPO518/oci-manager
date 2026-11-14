@@ -34,18 +34,21 @@ func respondAuthError(c *gin.Context) {
 	c.Abort()
 }
 
-// setSessionCookie 下发会话 Cookie。
-// 仅当请求走 HTTPS 时加 Secure 标记，避免本地 http 调试时 Cookie 被丢弃。
-func setSessionCookie(c *gin.Context, token string) {
-	secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookie, token, sessionMaxAge, "/", "", secure, true)
+// sessionSecure 只依据服务端是否已签发证书判断，
+// 不再信任客户端可伪造的 X-Forwarded-Proto。
+// 一旦启用 HTTPS，Cookie 必须带 Secure，杜绝明文 HTTP 上被嗅探。
+func (s *Server) sessionSecure() bool {
+	return s.tlsMgr != nil && s.tlsMgr.HasCertificate()
 }
 
-func clearSessionCookie(c *gin.Context) {
-	secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+func (s *Server) setSessionCookie(c *gin.Context, token string) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookie, "", -1, "/", "", secure, true)
+	c.SetCookie(sessionCookie, token, sessionMaxAge, "/", "", s.sessionSecure(), true)
+}
+
+func (s *Server) clearSessionCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookie, "", -1, "/", "", s.sessionSecure(), true)
 }
 
 // authStatus 返回当前鉴权状态，前端据此决定展示初始化页还是登录页。
@@ -67,6 +70,10 @@ func (s *Server) authStatus(c *gin.Context) {
 
 // authSetup 首次使用时设置管理员账号。
 func (s *Server) authSetup(c *gin.Context) {
+	// 初始化窗口是唯一的抢注点，严格限制尝试频率。
+	if !s.rateLimit(c, "setup", 5, time.Minute) {
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -84,6 +91,9 @@ func (s *Server) authSetup(c *gin.Context) {
 
 // authLogin 校验用户名密码。开启两步验证时返回 challenge 而不发放会话。
 func (s *Server) authLogin(c *gin.Context) {
+	if !s.rateLimit(c, "login", 10, time.Minute) {
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -103,13 +113,16 @@ func (s *Server) authLogin(c *gin.Context) {
 			respondError(c, err)
 			return
 		}
-		setSessionCookie(c, token)
+		s.setSessionCookie(c, token)
 	}
 	c.JSON(http.StatusOK, result)
 }
 
 // authVerifyOTP 校验 Telegram 验证码并发放会话。
 func (s *Server) authVerifyOTP(c *gin.Context) {
+	if !s.rateLimit(c, "otp", 20, time.Minute) {
+		return
+	}
 	var body struct {
 		Challenge string `json:"challenge"`
 		Code      string `json:"code"`
@@ -123,7 +136,7 @@ func (s *Server) authVerifyOTP(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	setSessionCookie(c, token)
+	s.setSessionCookie(c, token)
 	respondOK(c, gin.H{"status": "ok", "username": username})
 }
 
@@ -132,7 +145,7 @@ func (s *Server) authLogout(c *gin.Context) {
 	if token, err := c.Cookie(sessionCookie); err == nil {
 		s.auth.Logout(token)
 	}
-	clearSessionCookie(c)
+	s.clearSessionCookie(c)
 	respondOK(c, gin.H{"status": "ok"})
 }
 
@@ -151,5 +164,16 @@ func (s *Server) authChangePassword(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	// ChangePassword 已撤销全部会话，给当前浏览器补发一张新会话，其它设备保持下线。
+	username := body.Username
+	if st, err := s.auth.Status(); err == nil && st.Username != "" {
+		username = st.Username
+	}
+	token, err := s.auth.CreateSession(username)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	s.setSessionCookie(c, token)
 	respondOK(c, gin.H{"status": "ok"})
 }

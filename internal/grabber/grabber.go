@@ -4,18 +4,35 @@
 // 创建实例时经常返回 "Out of host capacity"。本包通过定时重试来抢占
 // 偶发释放的资源：只有容量不足才继续重试，其他错误一律终止任务，
 // 避免因为配置错误（例如子网或镜像填错）而无限循环。
+//
+// 风控策略（重要）：
+//   - 每轮先用只读的 Compute Capacity Report 预判，没货就不发任何写请求；
+//   - OCI 限流(429)、5xx、超时一律「退避暂停」，绝不降级成高频直接创建；
+//   - 所有 OCI 调用经过全局节流，参数在服务端强制 clamp，避免多个任务叠加。
 package grabber
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/store"
+)
+
+// 服务端强制的调用频率与数量下限。前端的 min 属性可以绕过，必须在这里兜底。
+const (
+	minIntervalSec         = 30
+	maxIntervalSec         = 3600
+	defaultIntervalSec     = 60
+	fallbackMinIntervalSec = 120 // 降级为直接创建后，间隔不能低于 2 分钟
+	maxInstancesPerTask    = 10
+	minAPIGap              = 2 * time.Second // 全局 OCI 调用最小间隔
+	maxBackoff             = 15 * time.Minute
 )
 
 // Notifier 用于在抢购任务状态变化时推送通知。
@@ -26,6 +43,16 @@ type Notifier interface {
 	Send(text string) error
 }
 
+// precheckDecision 是容量预检的结论。
+type precheckDecision int
+
+const (
+	decisionLaunch   precheckDecision = iota // 有货/预检关闭：可以创建
+	decisionSkip                             // 确认无货：等下一轮，不发写请求
+	decisionBackoff                          // 限流/网络/服务端错误：指数退避，绝不直创
+	decisionFallback                         // 接口确实不可用：降级直创，但拉长间隔
+)
+
 // Manager 管理抢购任务的生命周期。
 type Manager struct {
 	store  *store.Store
@@ -34,6 +61,9 @@ type Manager struct {
 
 	mu      sync.Mutex
 	running map[string]*taskHandle
+
+	rateMu      sync.Mutex
+	lastAPICall time.Time
 }
 
 type taskHandle struct {
@@ -47,6 +77,70 @@ func NewManager(st *store.Store, pool *oci.Pool, notify Notifier) *Manager {
 		pool:    pool,
 		notify:  notify,
 		running: make(map[string]*taskHandle),
+	}
+}
+
+// reserveSlot 给所有 OCI 调用做全局节流，避免多个任务同时轮询形成请求脉冲。
+// 采用「预约时间点」而不是简单 sleep，防止并发 goroutine 一起通过检查。
+func (m *Manager) reserveSlot(ctx context.Context) error {
+	for {
+		m.rateMu.Lock()
+		now := time.Now()
+		next := m.lastAPICall.Add(minAPIGap)
+		if !now.Before(next) {
+			m.lastAPICall = now
+			m.rateMu.Unlock()
+			return nil
+		}
+		m.lastAPICall = next
+		wait := next.Sub(now)
+		m.rateMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+			return nil
+		}
+	}
+}
+
+// taskIntervalSec 把轮询间隔收敛到安全区间。数据库中历史任务即使写着 1 秒，
+// 运行时也不会低于 30 秒。
+func taskIntervalSec(t *store.GrabTask) int {
+	v := t.IntervalSec
+	if v <= 0 {
+		v = defaultIntervalSec
+	}
+	if v < minIntervalSec {
+		v = minIntervalSec
+	}
+	if v > maxIntervalSec {
+		v = maxIntervalSec
+	}
+	return v
+}
+
+// backoffDuration 指数退避 + 抖动，避免多任务同步重试。
+func backoffDuration(failures int) time.Duration {
+	d := 30 * time.Second
+	for i := 1; i < failures && d < maxBackoff; i++ {
+		d *= 2
+	}
+	if d > maxBackoff {
+		d = maxBackoff
+	}
+	return d + time.Duration(rand.Int63n(int64(d/5)+1))
+}
+
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		d = time.Second
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 
@@ -75,8 +169,6 @@ func taskSummary(t *store.GrabTask) string {
 }
 
 // RecoverOrphans 在服务启动时清理上次运行遗留的 running 任务。
-// 进程重启后对应的 goroutine 已不存在，必须把状态纠正过来，
-// 否则前端会一直显示"运行中"。
 func (m *Manager) RecoverOrphans() error {
 	tasks, err := m.store.ListGrabTasks("")
 	if err != nil {
@@ -115,8 +207,8 @@ func (m *Manager) Start(taskID string) error {
 		delete(m.running, taskID)
 		return err
 	}
-	_ = m.store.AppendLog(taskID, "info", fmt.Sprintf("任务启动：%s / %s / %d OCPU / %d GB 内存",
-		task.Shape, task.ADName, task.OCPUs, task.MemoryGBs))
+	_ = m.store.AppendLog(taskID, "info", fmt.Sprintf("任务启动：%s / %s / %d OCPU / %d GB 内存（轮询间隔 %d 秒）",
+		task.Shape, task.ADName, task.OCPUs, task.MemoryGBs, taskIntervalSec(task)))
 
 	go func() {
 		defer func() {
@@ -135,7 +227,6 @@ func (m *Manager) Stop(taskID string) error {
 	handle, ok := m.running[taskID]
 	m.mu.Unlock()
 	if !ok {
-		// 任务可能处于空闲或已结束状态，这里做幂等处理
 		if task, err := m.store.GetGrabTask(taskID); err == nil && task.Status == store.StatusRunning {
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusStopped, "任务已停止")
 		}
@@ -156,9 +247,10 @@ func (m *Manager) IsRunning(taskID string) bool {
 }
 
 func (m *Manager) loop(ctx context.Context, taskID string) {
-	// precheckAvailable 记录容量报告接口是否可用。首次发现不可用时降级为
-	// 直接创建，并关闭后续预检，避免每轮都白跑一次注定失败的请求。
+	// precheckAvailable 为 false 表示容量报告接口确实不可用，已降级为直接创建。
+	// 降级后仍保持长间隔，且不会因一次网络抖动就永久关闭预检。
 	precheckAvailable := true
+	transientFailures := 0
 
 	for {
 		task, err := m.store.GetGrabTask(taskID)
@@ -175,31 +267,47 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			return
 		}
 
-		// ---- 抢购前容量预检 ----
-		// 用只读的 Compute Capacity Report 判断是否有货，只有有货时才发起
-		// LaunchInstance。这样绝大多数轮询不会产生写调用，显著降低风控风险。
+		interval := time.Duration(taskIntervalSec(task)) * time.Second
+		if !precheckAvailable && interval < fallbackMinIntervalSec*time.Second {
+			interval = fallbackMinIntervalSec * time.Second
+		}
+
+		// ---- 抢购前容量预检（只读，不创建实例）----
 		if precheckAvailable {
-			launch, note := m.capacityPrecheck(ctx, clients, task)
+			if err := m.reserveSlot(ctx); err != nil {
+				return
+			}
+			decision, note := m.capacityPrecheck(ctx, clients, task)
 			_ = m.store.AppendLog(taskID, "info", note)
-			if !launch {
-				interval := task.IntervalSec
-				if interval <= 0 {
-					interval = 60
-				}
-				select {
-				case <-ctx.Done():
+			switch decision {
+			case decisionSkip:
+				transientFailures = 0
+				if !sleepOrDone(ctx, interval) {
 					return
-				case <-time.After(time.Duration(interval) * time.Second):
 				}
 				continue
-			}
-			if strings.Contains(note, "降级") || strings.Contains(note, "预检失败") {
+			case decisionBackoff:
+				transientFailures++
+				wait := backoffDuration(transientFailures)
+				_ = m.store.AppendLog(taskID, "warn",
+					fmt.Sprintf("预检暂时不可用，退避 %s 后重试（连续 %d 次，本轮未调用创建接口）", wait, transientFailures))
+				if !sleepOrDone(ctx, wait) {
+					return
+				}
+				continue
+			case decisionFallback:
 				precheckAvailable = false
+				interval = fallbackMinIntervalSec * time.Second
+				_ = m.store.AppendLog(taskID, "warn", "已降级为直接创建，轮询间隔自动拉长到 2 分钟以降低风控风险")
 			}
+			transientFailures = 0
 		}
 
 		attempt := task.Attempts + 1
 		_ = m.store.AppendLog(taskID, "info", fmt.Sprintf("第 %d 次尝试创建实例", attempt))
+		if err := m.reserveSlot(ctx); err != nil {
+			return
+		}
 		created, launchErr := m.launchAll(ctx, clients, task)
 
 		if launchErr == nil {
@@ -210,6 +318,18 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			m.notifyGrab("🎉 ARM 抢购成功\n\n" + taskSummary(task) +
 				fmt.Sprintf("\n实例 ID：%s\n第 %d 次尝试", strings.Join(created, "\n"), attempt))
 			return
+		}
+
+		// 限流/暂时错误必须退避暂停，绝不能当作「容量不足」继续高频重试。
+		if oci.IsRateLimited(launchErr) || oci.IsTransientError(launchErr) {
+			transientFailures++
+			wait := backoffDuration(transientFailures)
+			_ = m.store.AppendLog(taskID, "warn",
+				fmt.Sprintf("OCI 限流或暂时不可用，退避 %s 后重试（连续 %d 次）", wait, transientFailures))
+			if !sleepOrDone(ctx, wait) {
+				return
+			}
+			continue
 		}
 
 		if !oci.IsCapacityError(launchErr) {
@@ -233,42 +353,32 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			return
 		}
 
-		interval := task.IntervalSec
-		if interval <= 0 {
-			interval = 60
-		}
-		select {
-		case <-ctx.Done():
+		if !sleepOrDone(ctx, interval) {
 			return
-		case <-time.After(time.Duration(interval) * time.Second):
 		}
 	}
 }
 
 // capacityPrecheck 在真正创建实例之前做一次只读容量探测。
 //
-// 返回 shouldLaunch=true 表示可以发起 LaunchInstance；false 表示本轮确认无货，
-// 调用方应直接等待下一轮，不要产生写调用。note 会写进任务日志，方便用户
-// 看清「为什么这次没有尝试创建」。
-//
-// 容量报告接口对部分个人账户不可用（权限或区域限制），此时自动降级为
-// 原来的直接创建逻辑，保证抢购功能不会因此失效。
-func (m *Manager) capacityPrecheck(ctx context.Context, clients *oci.ClientSet, task *store.GrabTask) (bool, string) {
+// 关键：只有在「接口确实不被账户支持」时才降级直创。
+// 429 / 5xx / 超时 / 网络抖动一律返回 decisionBackoff，
+// 否则 OCI 一开始限流，系统反而会关掉预检、按最短间隔狂发 LaunchInstance。
+func (m *Manager) capacityPrecheck(ctx context.Context, clients *oci.ClientSet, task *store.GrabTask) (precheckDecision, string) {
 	value, err := m.store.GetSetting("capacity_precheck")
 	if err == nil && value == "0" {
-		return true, "容量预检已关闭，直接尝试创建实例"
+		return decisionLaunch, "容量预检已关闭，直接尝试创建实例"
 	}
 
 	account, err := m.store.GetAccount(task.AccountID)
 	if err != nil {
-		return true, "容量预检跳过（读取账号失败），直接尝试创建实例"
+		return decisionBackoff, "容量预检跳过（读取账号失败），本轮不创建实例"
 	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
 	items, err := oci.CheckCapacity(probeCtx, clients, oci.CapacityQuery{
-		// 容量报告要求以根区间（Tenancy OCID）为作用域。
 		CompartmentID:      account.TenancyOCID,
 		AvailabilityDomain: task.ADName,
 		Shape:              task.Shape,
@@ -276,31 +386,46 @@ func (m *Manager) capacityPrecheck(ctx context.Context, clients *oci.ClientSet, 
 		MemoryGBs:          float32(task.MemoryGBs),
 	})
 	if err != nil {
-		if oci.IsCapacityReportUnsupported(err) {
-			return true, "容量报告接口不可用（账户无权限或区域未开放），已降级为直接创建"
+		if oci.IsRateLimited(err) || oci.IsTransientError(err) {
+			return decisionBackoff, "容量预检遇到限流或暂时错误，本轮不创建实例，稍后指数退避重试"
 		}
-		return true, "容量预检失败（" + err.Error() + "），本次改为直接创建"
+		if oci.IsCapacityReportUnsupported(err) {
+			return decisionFallback, "容量报告接口不可用（账户无权限或区域未开放），已降级为直接创建"
+		}
+		return decisionBackoff, "容量预检失败（" + oci.DescribeError(err) + "），本轮不创建实例"
 	}
 
 	if oci.AnyAvailable(items) {
-		return true, fmt.Sprintf("容量预检：%s / %s 有库存，发起创建请求",
+		return decisionLaunch, fmt.Sprintf("容量预检：%s / %s 有库存，发起创建请求",
 			task.ADName, task.Shape)
 	}
 	status := oci.CapacityUnknown
 	if len(items) > 0 {
 		status = items[0].AvailabilityStatus
 	}
-	return false, fmt.Sprintf("容量预检：%s / %s %s，跳过本次创建请求（未调用 LaunchInstance）",
+	return decisionSkip, fmt.Sprintf("容量预检：%s / %s %s，跳过本次创建请求（未调用 LaunchInstance）",
 		task.ADName, task.Shape, oci.StatusLabel(status))
 }
 
 // launchAll 按任务要求创建指定数量的实例，全部成功才返回 nil。
 // 已创建成功的实例会保留，不会回滚。
 func (m *Manager) launchAll(ctx context.Context, clients *oci.ClientSet, task *store.GrabTask) ([]string, error) {
-	created := make([]string, 0, task.InstanceCount)
-	for i := 0; i < task.InstanceCount; i++ {
+	count := task.InstanceCount
+	if count <= 0 {
+		count = 1
+	}
+	if count > maxInstancesPerTask {
+		count = maxInstancesPerTask
+	}
+	created := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			if err := m.reserveSlot(ctx); err != nil {
+				return created, err
+			}
+		}
 		name := task.DisplayName
-		if task.InstanceCount > 1 {
+		if count > 1 {
 			name = fmt.Sprintf("%s-%d", task.DisplayName, i+1)
 		}
 		instance, err := oci.LaunchInstance(ctx, clients, oci.LaunchParams{

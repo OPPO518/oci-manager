@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,11 +33,11 @@ type Credentials struct {
 
 // ClientSet 是某个账号在某个区域下的一组服务客户端。
 type ClientSet struct {
-	Region     string
-	Compute    *core.ComputeClient
-	Identity   *identity.IdentityClient
-	Usage      *usageapi.UsageapiClient
-	Network    *core.VirtualNetworkClient
+	Region   string
+	Compute  *core.ComputeClient
+	Identity *identity.IdentityClient
+	Usage    *usageapi.UsageapiClient
+	Network  *core.VirtualNetworkClient
 }
 
 // newClientSet 构建一组客户端。proxyURL 为空表示直连。
@@ -102,7 +103,9 @@ func newClientSet(creds Credentials, region, proxyURL string) (*ClientSet, error
 //	socks5://user:pass@1.2.3.4:1080
 func newHTTPClient(proxyURL string) (*http.Client, error) {
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		// 不读取 HTTP_PROXY/HTTPS_PROXY 环境变量：容器里若被注入恶意全局代理，
+		// 会把所有 OCI 请求静默导向第三方。代理必须由账号显式配置。
+		Proxy: nil,
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -124,6 +127,15 @@ func newHTTPClient(proxyURL string) (*http.Client, error) {
 		case "http", "https", "socks5":
 		default:
 			return nil, fmt.Errorf("不支持的代理协议 %q，仅支持 http/https/socks5", parsed.Scheme)
+		}
+		// 阻止把代理指向云厂商元数据服务 / 链路本地地址，避免容器被当内网探测跳板。
+		// 本机(127.0.0.1)与 RFC1918 地址属于「本机多代理」的合法用法，仍允许。
+		host := strings.ToLower(parsed.Hostname())
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+			return nil, fmt.Errorf("代理不能指向链路本地地址 %s（云元数据服务）", host)
+		}
+		if strings.Contains(host, "metadata") && strings.Contains(host, "internal") {
+			return nil, fmt.Errorf("代理不能指向实例元数据服务 %s", host)
 		}
 		transport.Proxy = http.ProxyURL(parsed)
 	}

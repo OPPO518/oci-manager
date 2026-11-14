@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -189,13 +190,17 @@ func (s *Service) send(token, chatID, text string) error {
 	url := "https://api.telegram.org/bot" + token + "/sendMessage"
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return err
+		// 解析失败时错误信息会带上完整 URL（含 Bot Token），必须先脱敏。
+		return fmt.Errorf("Telegram 请求构造失败: %s", strings.ReplaceAll(err.Error(), token, "***"))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	res, err := s.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("请求 Telegram 失败: %w", err)
+		// *url.Error 会把 https://api.telegram.org/bot<TOKEN>/sendMessage 原样带出来。
+		// 这个错误会经登录接口/设置页回显并写进日志，绝不能透传原始 err。
+		log.Printf("Telegram API 请求失败（已脱敏）: %s", strings.ReplaceAll(err.Error(), token, "***"))
+		return fmt.Errorf("无法连接 Telegram API（网络错误）")
 	}
 	defer res.Body.Close()
 

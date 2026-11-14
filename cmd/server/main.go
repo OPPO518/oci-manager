@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,9 +39,10 @@ func run() error {
 	}
 
 	if dir := filepath.Dir(cfg.DBPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("创建数据目录失败: %w", err)
 		}
+		_ = os.Chmod(dir, 0o700)
 	}
 
 	sealer, err := secret.NewSealer(cfg.EncryptionKey)
@@ -74,9 +76,30 @@ func run() error {
 	}
 
 	handler := srv.Handler()
+	// 证书签发后，HTTP 只留本机健康检查；外部访问一律 308 跳到 HTTPS，
+	// 避免登录密码、OTP 与 OCI 私钥继续走明文。反代已终结 TLS 或排障时可设
+	// OCI_MANAGER_ALLOW_HTTP=true 关闭跳转。
+	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		if !cfg.AllowInsecureHTTP && tlsMgr.HasCertificate() && r.TLS == nil {
+			host := r.Host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			if cfg.PublicHTTPSPort != "" && cfg.PublicHTTPSPort != "443" {
+				host = net.JoinHostPort(host, cfg.PublicHTTPSPort)
+			}
+			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           handler,
+		Handler:           httpHandler,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
@@ -94,9 +117,10 @@ func run() error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		log.Printf("OCI 管理器已启动，HTTP 监听 %s，HTTPS 监听 %s", cfg.Addr, cfg.HTTPSAddr)
-		if cfg.WarnDevelopmentKey {
-			log.Printf("警告：未设置环境变量 OCI_MANAGER_ENCRYPTION_KEY，正在使用默认密钥，请勿用于生产环境")
+		log.Printf("OCI 管理器已启动，HTTP 监听 %s，HTTPS 监听 %s（加密密钥指纹 %s）",
+			cfg.Addr, cfg.HTTPSAddr, cfg.KeyFingerprintHex())
+		if !tlsMgr.HasCertificate() {
+			log.Printf("尚未启用 HTTPS：请先不要录入真实 OCI 凭证，在「设置 → HTTPS 证书」配置证书后会自动跳转")
 		}
 		if st, err := authSvc.Status(); err == nil && !st.Initialized {
 			log.Printf("尚未设置管理员账号，请打开面板完成初始化设置")

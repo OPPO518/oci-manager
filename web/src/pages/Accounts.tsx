@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, ErrorBanner, Field, Loading, Modal } from '../components/ui'
+import {
+  ActionsMenu,
+  Badge,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  Field,
+  Loading,
+  Modal,
+  Notice,
+  usePager,
+} from '../components/ui'
 import { api } from '../lib/api'
 import { useAccount } from '../lib/context'
 import { formatDateTime, truncate } from '../lib/format'
@@ -25,6 +36,8 @@ export default function Accounts() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState('')
   const [testResult, setTestResult] = useState<TestResult | null>(null)
+
+  const { paged, pager } = usePager(accounts)
 
   useEffect(() => {
     if (!account && accounts.length > 0) {
@@ -53,6 +66,13 @@ export default function Accounts() {
     setFormOpen(true)
   }
 
+  /** 关闭或保存后显式清空含 private_key_pem / passphrase 的敏感表单状态 */
+  function closeForm() {
+    setFormOpen(false)
+    setForm(EMPTY_FORM)
+    setEditing(null)
+  }
+
   async function submit() {
     setSaving(true)
     setError('')
@@ -62,7 +82,7 @@ export default function Accounts() {
       } else {
         await api.accounts.create(form)
       }
-      setFormOpen(false)
+      closeForm()
       await reload()
     } catch (err) {
       setError((err as Error).message)
@@ -100,12 +120,12 @@ export default function Accounts() {
       {error && <ErrorBanner message={error} onClose={() => setError('')} />}
 
       {testResult && (
-        <div className="rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <Notice tone="success" className="mb-4">
           连接成功：租户「{testResult.tenancy_name}」，已订阅 {testResult.region_count} 个区域，
           当前区域 {testResult.region}
           {testResult.proxy_url ? `，出口代理 ${testResult.proxy_url}` : '，直连'}，
           耗时 {testResult.latency_ms} ms
-        </div>
+        </Notice>
       )}
 
       <Card
@@ -121,69 +141,86 @@ export default function Accounts() {
         </p>
 
         {accounts.length === 0 ? (
-          <p className="py-8 text-center text-sm text-oracle-muted">还没有账号</p>
+          <EmptyState />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="oci-table">
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>区域</th>
-                  <th>出口代理</th>
-                  <th>租户 OCID</th>
-                  <th>指纹</th>
-                  <th>添加时间</th>
-                  <th className="text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.map((item) => (
-                  <tr key={item.id}>
-                    <td className="font-medium">{item.name}</td>
-                    <td className="text-xs">{item.region}</td>
-                    <td>
-                      {item.proxy_url ? (
-                        <Badge tone="border-blue-200 bg-blue-50 text-blue-700">
-                          {truncate(item.proxy_url, 24, 0)}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-oracle-muted">直连</span>
-                      )}
-                    </td>
-                    <td className="font-mono text-xs">{truncate(item.tenancy_ocid)}</td>
-                    <td className="font-mono text-xs">{truncate(item.fingerprint, 14, 0)}</td>
-                    <td className="text-xs text-oracle-muted">{formatDateTime(item.created_at)}</td>
-                    <td>
-                      <div className="flex justify-end gap-1">
-                        <button
-                          type="button"
-                          className="oci-btn-secondary"
-                          disabled={testing === item.id}
-                          onClick={() => void test(item)}
-                        >
-                          {testing === item.id ? '测试中…' : '测试连接'}
-                        </button>
-                        <button type="button" className="oci-btn-secondary" onClick={() => openEdit(item)}>
-                          编辑
-                        </button>
-                        <button type="button" className="oci-btn-danger" onClick={() => void remove(item)}>
-                          删除
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="oci-table-wrap">
+              <table className="oci-table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>区域</th>
+                    <th>出口代理</th>
+                    <th>租户 OCID</th>
+                    <th>指纹</th>
+                    <th>添加时间</th>
+                    <th className="oci-cell-actions">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paged.map((item) => (
+                    <tr key={item.id}>
+                      <td className="font-medium">{item.name}</td>
+                      <td className="text-xs">{item.region}</td>
+                      <td>
+                        {item.proxy_url ? (
+                          <Badge tone="info">{truncate(item.proxy_url, 24, 0)}</Badge>
+                        ) : (
+                          <span className="text-xs text-oracle-muted">直连</span>
+                        )}
+                      </td>
+                      <td className="font-mono text-xs">{truncate(item.tenancy_ocid)}</td>
+                      <td className="font-mono text-xs">{truncate(item.fingerprint, 14, 0)}</td>
+                      <td className="text-xs text-oracle-muted">{formatDateTime(item.created_at)}</td>
+                      <td className="oci-cell-actions">
+                        <div className="flex justify-end">
+                          <ActionsMenu
+                            label="账号操作"
+                            items={[
+                              {
+                                label: testing === item.id ? '测试中…' : '测试连接',
+                                disabled: testing === item.id,
+                                onSelect: () => void test(item),
+                              },
+                              {
+                                label: '编辑',
+                                onSelect: () => openEdit(item),
+                              },
+                              {
+                                label: '删除',
+                                danger: true,
+                                separatorBefore: true,
+                                onSelect: () => void remove(item),
+                              },
+                            ]}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {pager}
+          </>
         )}
       </Card>
 
       {formOpen && (
         <Modal
           title={editing ? '编辑账号' : '添加账号'}
-          onClose={() => setFormOpen(false)}
+          onClose={closeForm}
           width="max-w-2xl"
+          footer={
+            <>
+              <button type="button" className="oci-btn-secondary" onClick={closeForm}>
+                取消
+              </button>
+              <button type="button" className="oci-btn-primary" disabled={saving} onClick={() => void submit()}>
+                {saving ? '保存中…' : '保存'}
+              </button>
+            </>
+          }
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="账号名称">
@@ -247,6 +284,7 @@ export default function Accounts() {
                 <textarea
                   className="oci-input h-32 font-mono text-xs"
                   placeholder="-----BEGIN PRIVATE KEY-----"
+                  autoComplete="off"
                   value={form.private_key_pem}
                   onChange={(e) => setForm((f) => ({ ...f, private_key_pem: e.target.value }))}
                 />
@@ -257,20 +295,12 @@ export default function Accounts() {
                 <input
                   type="password"
                   className="oci-input"
+                  autoComplete="off"
                   value={form.passphrase}
                   onChange={(e) => setForm((f) => ({ ...f, passphrase: e.target.value }))}
                 />
               </Field>
             </div>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" className="oci-btn-secondary" onClick={() => setFormOpen(false)}>
-              取消
-            </button>
-            <button type="button" className="oci-btn-primary" disabled={saving} onClick={() => void submit()}>
-              {saving ? '保存中…' : '保存'}
-            </button>
           </div>
         </Modal>
       )}

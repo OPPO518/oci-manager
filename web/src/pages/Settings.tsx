@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, ErrorBanner, Field, SuccessBanner } from '../components/ui'
+import { Badge, Card, ErrorBanner, Field, Notice, SuccessBanner, Switch } from '../components/ui'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { formatDateTime } from '../lib/format'
@@ -223,14 +223,11 @@ export default function Settings() {
             配置后可接收登录提醒、登录验证码与 ARM 抢购结果。Bot Token 以加密形式存库，接口不回传明文。
           </p>
           <div className="max-w-2xl space-y-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={tg.enabled}
-                onChange={(e) => setTg((s) => ({ ...s, enabled: e.target.checked }))}
-              />
-              启用 Telegram 通知
-            </label>
+            <Switch
+              checked={tg.enabled}
+              onChange={(c) => setTg((s) => ({ ...s, enabled: c }))}
+              label="启用 Telegram 通知"
+            />
 
             <Field
               label="Bot Token"
@@ -262,22 +259,16 @@ export default function Settings() {
             </Field>
 
             <div className="space-y-2 border-t border-oracle-border pt-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={tg.login_otp}
-                  onChange={(e) => setTg((s) => ({ ...s, login_otp: e.target.checked }))}
-                />
-                登录时要求输入 Telegram 验证码（两步验证）
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={tg.event_grab}
-                  onChange={(e) => setTg((s) => ({ ...s, event_grab: e.target.checked }))}
-                />
-                抢购任务成功或终止时推送通知
-              </label>
+              <Switch
+                checked={tg.login_otp}
+                onChange={(c) => setTg((s) => ({ ...s, login_otp: c }))}
+                label="登录时要求输入 Telegram 验证码（两步验证）"
+              />
+              <Switch
+                checked={tg.event_grab}
+                onChange={(c) => setTg((s) => ({ ...s, event_grab: c }))}
+                label="抢购任务成功或终止时推送通知"
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -297,12 +288,12 @@ export default function Settings() {
               >
                 {testingTG ? '发送中…' : '发送测试消息'}
               </button>
-              <span className="ml-1 text-xs text-oracle-muted">
+              <span className="ml-1 inline-flex items-center gap-2 text-xs text-oracle-muted">
                 当前状态：
                 {tg.enabled && tg.has_token && tg.chat_id ? (
-                  <Badge tone="border-[#bbe3cb] bg-[#f0faf4] text-[#136437]">已配置</Badge>
+                  <Badge tone="success">已配置</Badge>
                 ) : (
-                  <Badge tone="border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]">未配置</Badge>
+                  <Badge tone="neutral">未配置</Badge>
                 )}
               </span>
             </div>
@@ -314,35 +305,26 @@ export default function Settings() {
       {tab === 'grabber' && (
         <Card title="抢购前容量预检">
           <div className="max-w-3xl space-y-4">
-            <div className="oci-notice oci-notice-info">
+            <Notice tone="info">
               开启后，抢购任务每轮先调用 OCI <strong>Compute Capacity Report</strong> 只读接口判断是否有货，
               <strong>只有显示 AVAILABLE 才会发起 LaunchInstance</strong>。绝大多数轮询因此不再产生写调用，
               能显著降低高频创建请求触发风控的概率。
               <br />
               若该账户无权使用容量报告接口，任务会自动降级为直接创建，并在日志中标注，不会中断抢购。
-            </div>
+            </Notice>
 
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={precheck}
-                disabled={savingPrecheck}
-                onChange={(e) => void savePrecheck(e.target.checked)}
-              />
-              启用抢购前容量预检（推荐）
-            </label>
+            <Switch
+              checked={precheck}
+              disabled={savingPrecheck}
+              onChange={(c) => void savePrecheck(c)}
+              label="启用抢购前容量预检（推荐）"
+            />
 
             <dl className="grid grid-cols-1 gap-3 border-t border-oracle-border pt-4 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-xs text-oracle-muted">当前状态</dt>
                 <dd className="mt-1">
-                  <Badge
-                    tone={
-                      precheck
-                        ? 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]'
-                        : 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]'
-                    }
-                  >
+                  <Badge tone={precheck ? 'success' : 'warning'}>
                     {precheck ? '已开启' : '已关闭'}
                   </Badge>
                 </dd>
@@ -368,19 +350,19 @@ export default function Settings() {
           extra={
             <span className="text-xs text-oracle-muted">
               {tls.cert_issued ? (
-                <Badge tone="border-[#bbe3cb] bg-[#f0faf4] text-[#136437]">证书已生效</Badge>
+                <Badge tone="success">证书已生效</Badge>
               ) : (
-                <Badge tone="border-[#d9d6d2] bg-[#f5f4f2] text-[#5c5854]">未启用</Badge>
+                <Badge tone="neutral">未启用</Badge>
               )}
             </span>
           }
         >
           <div className="max-w-2xl space-y-4">
-            <div className="oci-notice oci-notice-info">
+            <Notice tone="info">
               通过 Cloudflare API 自动添加 <code className="font-mono">_acme-challenge</code> TXT 记录，
               向 Let's Encrypt 申请证书。不需要开放 80 端口，也不需要提前把域名解析到本机。
               证书保存在数据卷中，剩余有效期不足 30 天时自动续期。
-            </div>
+            </Notice>
 
             <Field label="域名" hint="例如 oci.example.com，该域名的 DNS 必须托管在 Cloudflare">
               <input
@@ -418,14 +400,15 @@ export default function Settings() {
               />
             </Field>
 
-            <label className="flex items-center gap-2 text-xs text-oracle-muted">
-              <input
-                type="checkbox"
-                checked={tlsStaging}
-                onChange={(e) => setTlsStaging(e.target.checked)}
-              />
-              使用 Let's Encrypt 测试环境（仅调试用，浏览器仍会提示证书不受信任）
-            </label>
+            <Switch
+              checked={tlsStaging}
+              onChange={setTlsStaging}
+              label={
+                <span className="text-xs text-oracle-muted">
+                  使用 Let&apos;s Encrypt 测试环境（仅调试用，浏览器仍会提示证书不受信任）
+                </span>
+              }
+            />
 
             <div className="flex flex-wrap items-center gap-2 border-t border-oracle-border pt-4">
               <button
@@ -462,9 +445,9 @@ export default function Settings() {
             </dl>
 
             {tls.last_error && (
-              <div className="oci-notice oci-notice-error break-all">
+              <Notice tone="danger" className="break-all">
                 上次申请失败：{tls.last_error}
-              </div>
+              </Notice>
             )}
 
             <p className="text-xs leading-relaxed text-oracle-muted">

@@ -26,9 +26,11 @@ func Open(path string, sealer *secret.Sealer) (*Store, error) {
 	// 容器里 /data 由卷挂载提供，但目录可能不存在或属主不对。
 	// 这里主动创建，避免 SQLite 报 unable to open database file (14)。
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("创建数据库目录 %s 失败: %w", dir, err)
 		}
+		// data/ 里除了数据库还存放证书私钥，禁止同主机其他用户读取。
+		_ = os.Chmod(dir, 0o700)
 	}
 
 	db, err := sql.Open("sqlite", path)
@@ -42,6 +44,16 @@ func Open(path string, sealer *secret.Sealer) (*Store, error) {
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("连接数据库失败（路径 %s，请确认该目录存在且进程有写权限）: %w", path, err)
+	}
+
+	// SQLite 默认按 umask 创建 0644 文件，里面存着加密私钥、Bot Token 和会话记录，
+	// 必须收紧到仅属主可读写；WAL/SHM 文件同样处理。
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		_ = db.Close()
+		return nil, fmt.Errorf("收紧数据库文件权限失败: %w", err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Chmod(path+suffix, 0o600)
 	}
 
 	s := &Store{db: db, sealer: sealer}

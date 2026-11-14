@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
+  ActionsMenu,
   Badge,
   Card,
   EmptyState,
@@ -9,6 +10,7 @@ import {
   Loading,
   Modal,
   TaskStatusBadge,
+  usePager,
 } from '../components/ui'
 import { api } from '../lib/api'
 import { useAccount } from '../lib/context'
@@ -65,6 +67,8 @@ export default function Grabber() {
   const [logTask, setLogTask] = useState<GrabTask | null>(null)
   const [logs, setLogs] = useState<GrabTaskLog[]>([])
   const lastLogId = useRef(0)
+
+  const { paged, pager } = usePager(tasks)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -252,13 +256,7 @@ export default function Grabber() {
         }
       >
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Badge
-            tone={
-              precheck
-                ? 'border-[#bbe3cb] bg-[#f0faf4] text-[#136437]'
-                : 'border-[#f0d9b0] bg-[#fdf7ec] text-[#8a5200]'
-            }
-          >
+          <Badge tone={precheck ? 'success' : 'warning'}>
             {precheck ? '抢购前容量预检：已开启' : '抢购前容量预检：已关闭'}
           </Badge>
           <span className="text-xs text-oracle-muted">
@@ -275,71 +273,97 @@ export default function Grabber() {
         ) : tasks.length === 0 ? (
           <EmptyState text="还没有抢购任务" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="oci-table">
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>状态</th>
-                  <th>规格</th>
-                  <th>可用域</th>
-                  <th>尝试次数</th>
-                  <th>最近尝试</th>
-                  <th className="text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task) => (
-                  <tr key={task.id}>
-                    <td>
-                      <div className="font-medium">{task.display_name}</div>
-                      {task.message && (
-                        <div className="text-xs text-oracle-muted">{task.message}</div>
-                      )}
-                    </td>
-                    <td>
-                      <TaskStatusBadge status={task.status} />
-                    </td>
-                    <td className="text-xs">
-                      {task.shape}
-                      <br />
-                      {task.ocpus} OCPU / {task.memory_gbs} GB × {task.instance_count}
-                    </td>
-                    <td className="text-xs text-oracle-muted">{task.ad_name}</td>
-                    <td>{task.attempts}</td>
-                    <td className="text-xs text-oracle-muted">{formatDateTime(task.last_attempt_at)}</td>
-                    <td>
-                      <div className="flex justify-end gap-1">
-                        <button
-                          type="button"
-                          className="oci-btn-secondary"
-                          disabled={task.status === 'success'}
-                          onClick={() => void toggleTask(task)}
-                        >
-                          {task.status === 'running' ? '停止' : '启动'}
-                        </button>
-                        <button
-                          type="button"
-                          className="oci-btn-secondary"
-                          onClick={() => setLogTask(task)}
-                        >
-                          日志
-                        </button>
-                        <button type="button" className="oci-btn-danger" onClick={() => void removeTask(task)}>
-                          删除
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="oci-table-wrap">
+              <table className="oci-table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>状态</th>
+                    <th>规格</th>
+                    <th>可用域</th>
+                    <th>尝试次数</th>
+                    <th>最近尝试</th>
+                    <th className="oci-cell-actions">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paged.map((task) => (
+                    <tr key={task.id}>
+                      <td>
+                        <div className="font-medium">{task.display_name}</div>
+                        {task.message && (
+                          <div className="text-xs text-oracle-muted">{task.message}</div>
+                        )}
+                      </td>
+                      <td>
+                        <TaskStatusBadge status={task.status} />
+                      </td>
+                      <td className="text-xs">
+                        {task.shape}
+                        <br />
+                        {task.ocpus} OCPU / {task.memory_gbs} GB × {task.instance_count}
+                      </td>
+                      <td className="text-xs text-oracle-muted">{task.ad_name}</td>
+                      <td>{task.attempts}</td>
+                      <td className="text-xs text-oracle-muted">
+                        {formatDateTime(task.last_attempt_at)}
+                      </td>
+                      <td className="oci-cell-actions">
+                        <div className="flex justify-end">
+                          <ActionsMenu
+                            label="任务操作"
+                            items={[
+                              {
+                                label: task.status === 'running' ? '停止' : '启动',
+                                disabled: task.status === 'success',
+                                onSelect: () => void toggleTask(task),
+                              },
+                              {
+                                label: '日志',
+                                onSelect: () => setLogTask(task),
+                              },
+                              {
+                                label: '删除',
+                                danger: true,
+                                separatorBefore: true,
+                                onSelect: () => void removeTask(task),
+                              },
+                            ]}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {pager}
+          </>
         )}
       </Card>
 
       {formOpen && (
-        <Modal title="新建抢购任务" onClose={() => setFormOpen(false)} width="max-w-2xl">
+        <Modal
+          title="新建抢购任务"
+          onClose={() => setFormOpen(false)}
+          width="max-w-2xl"
+          footer={
+            <>
+              <button type="button" className="oci-btn-secondary" onClick={() => setFormOpen(false)}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="oci-btn-primary"
+                disabled={submitting}
+                onClick={() => void submitForm()}
+              >
+                {submitting ? '创建中…' : '创建任务'}
+              </button>
+            </>
+          }
+        >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="任务名称">
               <input
@@ -357,7 +381,7 @@ export default function Grabber() {
             </Field>
             <Field label="区间">
               <select
-                className="oci-input"
+                className="oci-select"
                 value={form.compartment_id}
                 onChange={(e) => {
                   setForm((f) => ({ ...f, compartment_id: e.target.value }))
@@ -372,7 +396,7 @@ export default function Grabber() {
             </Field>
             <Field label="可用域">
               <select
-                className="oci-input"
+                className="oci-select"
                 value={form.ad_name}
                 onChange={(e) => setForm((f) => ({ ...f, ad_name: e.target.value }))}
               >
@@ -393,7 +417,7 @@ export default function Grabber() {
             </Field>
             <Field label="子网">
               <select
-                className="oci-input"
+                className="oci-select"
                 value={form.subnet_id}
                 onChange={(e) => setForm((f) => ({ ...f, subnet_id: e.target.value }))}
               >
@@ -469,7 +493,7 @@ export default function Grabber() {
                   onChange={(e) => setImageFilter(e.target.value)}
                 />
                 <select
-                  className="oci-input"
+                  className="oci-select"
                   value={form.image_id}
                   onChange={(e) => setForm((f) => ({ ...f, image_id: e.target.value }))}
                 >
@@ -493,26 +517,12 @@ export default function Grabber() {
               </Field>
             </div>
           </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" className="oci-btn-secondary" onClick={() => setFormOpen(false)}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="oci-btn-primary"
-              disabled={submitting}
-              onClick={() => void submitForm()}
-            >
-              {submitting ? '创建中…' : '创建任务'}
-            </button>
-          </div>
         </Modal>
       )}
 
       {logTask && (
         <Modal title={`任务日志：${logTask.display_name}`} onClose={() => setLogTask(null)} width="max-w-3xl">
-          <div className="max-h-96 overflow-y-auto rounded border border-oracle-border bg-oracle-ink p-3 font-mono text-xs leading-relaxed">
+          <div className="max-h-96 overflow-y-auto rounded border border-oracle-border bg-oracle-topbar p-3 font-mono text-xs leading-relaxed">
             {logs.length === 0 ? (
               <p className="text-white/50">暂无日志</p>
             ) : (

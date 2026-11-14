@@ -22,13 +22,13 @@ type capacityRequest struct {
 }
 
 type capacityResponse struct {
-	Region        string                 `json:"region"`
-	Shape         string                 `json:"shape"`
-	OCPUs         float32                `json:"ocpus"`
-	MemoryGBs     float32                `json:"memory_gbs"`
-	CompartmentID string                 `json:"compartment_id"`
-	Items         []oci.CapacityResult   `json:"items"`
-	CheckedAt     string                 `json:"checked_at"`
+	Region        string               `json:"region"`
+	Shape         string               `json:"shape"`
+	OCPUs         float32              `json:"ocpus"`
+	MemoryGBs     float32              `json:"memory_gbs"`
+	CompartmentID string               `json:"compartment_id"`
+	Items         []oci.CapacityResult `json:"items"`
+	CheckedAt     string               `json:"checked_at"`
 	// Unsupported 为 true 表示该账户无法使用容量报告接口，前端应提示改用直接抢购。
 	Unsupported bool   `json:"unsupported"`
 	Hint        string `json:"hint,omitempty"`
@@ -38,6 +38,10 @@ type capacityResponse struct {
 //
 // 使用 OCI Compute Capacity Report 只读接口，不创建实例、不占用配额。
 func (s *Server) checkCapacity(c *gin.Context) {
+	// 一次探测会对每个可用域发一次 OCI 只读请求，必须限流避免页面刷新放大调用量。
+	if !s.rateLimit(c, "capacity", 8, time.Minute) {
+		return
+	}
 	var body capacityRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, err)
@@ -64,8 +68,14 @@ func (s *Server) checkCapacity(c *gin.Context) {
 	if ocpus <= 0 {
 		ocpus = 4
 	}
+	if ocpus > 64 {
+		ocpus = 64
+	}
 	if memory <= 0 {
 		memory = 24
+	}
+	if memory > 512 {
+		memory = 512
 	}
 	region := body.Region
 	if region == "" {
@@ -85,6 +95,10 @@ func (s *Server) checkCapacity(c *gin.Context) {
 			respondError(c, fmt.Errorf("获取可用域失败: %s", oci.DescribeError(err)))
 			return
 		}
+	}
+	// 每个 AD 一次 OCI 调用，服务端必须有上限。
+	if len(ads) > 10 {
+		ads = ads[:10]
 	}
 
 	out := capacityResponse{
@@ -120,7 +134,7 @@ func (s *Server) checkCapacity(c *gin.Context) {
 				OCPUs:              ocpus,
 				MemoryGBs:          memory,
 				AvailabilityStatus: oci.CapacityUnknown,
-				Error:              err.Error(),
+				Error:              sanitizeError(err.Error()),
 			})
 			continue
 		}

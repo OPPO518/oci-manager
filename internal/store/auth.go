@@ -1,11 +1,21 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 )
+
+// sessionTokenHash 把会话令牌摘要后入库。
+// 令牌等同于管理员身份，若明文落库，任何读到 data/ 目录或备份的人都能
+// 直接设置 Cookie 接管面板，连密码和两步验证都不用破。
+func sessionTokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 
 // Admin 是系统唯一的管理员账号。
 type Admin struct {
@@ -66,22 +76,22 @@ func (s *Store) UpdateAdminPassword(passwordHash string) error {
 	return nil
 }
 
-// Session 是一次登录会话。
+// Session 是一次登录会话。Token 恒为摘要值，绝不放明文。
 type Session struct {
-	Token      string    `json:"token"`
+	Token      string    `json:"-"`
 	Username   string    `json:"username"`
 	CreatedAt  time.Time `json:"created_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
-// CreateSession 写入会话记录。
+// CreateSession 写入会话记录，只保存令牌摘要。
 func (s *Store) CreateSession(token, username string, ttl time.Duration) error {
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
 		`INSERT INTO sessions (token, username, created_at, expires_at, last_seen_at)
 		 VALUES (?, ?, ?, ?, ?)`,
-		token, username,
+		sessionTokenHash(token), username,
 		now.Format(time.RFC3339),
 		now.Add(ttl).Format(time.RFC3339),
 		now.Format(time.RFC3339),
@@ -102,7 +112,7 @@ func (s *Store) GetSession(token string) (*Session, bool, error) {
 	)
 	err := s.db.QueryRow(
 		`SELECT token, username, created_at, expires_at, last_seen_at FROM sessions WHERE token = ?`,
-		token,
+		sessionTokenHash(token),
 	).Scan(&sess.Token, &sess.Username, &createdText, &expiresText, &seenText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -125,14 +135,21 @@ func (s *Store) TouchSession(token string, ttl time.Duration) error {
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
 		`UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token = ?`,
-		now.Format(time.RFC3339), now.Add(ttl).Format(time.RFC3339), token,
+		now.Format(time.RFC3339), now.Add(ttl).Format(time.RFC3339), sessionTokenHash(token),
 	)
 	return err
 }
 
 // DeleteSession 删除会话。
 func (s *Store) DeleteSession(token string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, sessionTokenHash(token))
+	return err
+}
+
+// DeleteAllSessions 撤销全部会话。修改密码或怀疑泄露时调用，
+// 保证旧设备即使持有 Cookie 也会被立刻踢下线。
+func (s *Store) DeleteAllSessions() error {
+	_, err := s.db.Exec(`DELETE FROM sessions`)
 	return err
 }
 
@@ -197,6 +214,20 @@ func (s *Store) GetChallenge(token string) (*Challenge, bool, error) {
 func (s *Store) BumpChallengeAttempts(token string) error {
 	_, err := s.db.Exec(`UPDATE login_challenges SET attempts = attempts + 1 WHERE token = ?`, token)
 	return err
+}
+
+// ConsumeChallenge 原子地消费挑战：只有成功删掉唯一一条记录才返回 true。
+// 用于杜绝「同一验证码并发请求都通过 bcrypt 比较、换到多张会话」的竞态重放。
+func (s *Store) ConsumeChallenge(token string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM login_challenges WHERE token = ?`, token)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 // DeleteChallenge 删除登录挑战。

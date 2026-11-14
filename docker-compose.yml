@@ -21,6 +21,8 @@ services:
       OCI_MANAGER_ADDR: ":8080"
       OCI_MANAGER_HTTPS_ADDR: ":8443"
       OCI_MANAGER_DB: "/data/oci-manager.db"
+      # 证书签发后 HTTP 跳转 HTTPS 时使用的对外端口
+      OCI_MANAGER_PUBLIC_HTTPS_PORT: ${OCI_MANAGER_HTTPS_PORT:-443}
       # 用于加密数据库中存储的 OCI API 私钥，取自同目录下的 .env
       # 生成方式：openssl rand -hex 32
       # 修改此值会导致已保存的账号无法解密，请勿在录入账号后随意更改

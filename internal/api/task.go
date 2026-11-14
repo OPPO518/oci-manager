@@ -123,6 +123,12 @@ func (s *Server) stopGrabTask(c *gin.Context) {
 func (s *Server) grabTaskLogs(c *gin.Context) {
 	after, _ := strconv.Atoi(c.DefaultQuery("after", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
 	logs, err := s.store.ListLogs(c.Param("id"), after, limit)
 	if err != nil {
 		respondError(c, err)

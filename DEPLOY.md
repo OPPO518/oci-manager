@@ -1,5 +1,31 @@
 # 部署文档：GitHub → VPS → Docker
 
+## 安全基线（2026-11-14 加固，录入真实凭证前必读）
+
+1. **先启用 HTTPS，再录入 OCI 凭证**。未配置证书时页面顶部会显示明文警告。证书签发后
+   HTTP 会自动 308 跳转到 HTTPS（`/api/health` 除外），会话 Cookie 强制带 `Secure`，
+   并下发 HSTS、CSP、`X-Frame-Options`、`Referrer-Policy` 等响应头。
+   若使用 Cloudflare Flexible 这类「反代终结 TLS、回源走 HTTP」的模式，需设
+   `OCI_MANAGER_ALLOW_HTTP=true` 且把 8080 只绑到 `127.0.0.1`，否则会跳转循环。
+2. **加密密钥没有默认值**。`OCI_MANAGER_ENCRYPTION_KEY` 缺失或少于 32 字符时服务直接
+   拒绝启动。`.env` 必须备份，丢失后已录入的账号无法解密。
+3. **升级后需要重新登录一次**。会话令牌改为 SHA-256 摘要存储，旧版明文会话记录不再被
+   接受——这是为了阻断「读到 `data/` 目录即拿到管理员会话」的攻击路径。
+4. **改密码会踢掉所有其它设备**：服务端清空会话表，只给当前浏览器补发新会话。
+5. **数据库权限自动收紧**：`data/` 为 0700，`.db` / `-wal` / `-shm` 为 0600；
+   一键脚本也会 `chmod 700 data`。备份文件请同样按 0600 保管。
+6. **防风控默认参数**：抢购轮询间隔服务端强制 30–3600 秒，单任务最多 10 台实例，
+   所有 OCI 调用有 2 秒全局最小间隔；OCI 返回 429 / 5xx / 超时会指数退避（30 秒起，
+   最长 15 分钟，带抖动），**不会**再降级成每轮直接创建。只有容量报告接口明确返回
+   「不支持 / 无权限」时才降级，且降级后间隔自动拉长到 2 分钟。容量探测单次最多
+   10 个可用域、每分钟最多 8 次。
+7. **公开接口限流**：初始化 5 次/分钟、登录 10 次/分钟、OTP 20 次/分钟（按来源 IP）；
+   登录失败同时按用户名与 IP 计数锁定，且不信任可伪造的 `X-Forwarded-For`。
+8. **错误与日志脱敏**：Telegram 网络错误不再回显含 Bot Token 的 URL，代理地址里的
+   账号密码在诊断结果中打码，对外错误信息统一过滤路径与凭据。
+
+---
+
 ## 零、一键部署（推荐，只需一条命令）
 
 镜像由 GitHub Actions 预先构建并发布到 GHCR，VPS 上**不需要编译前端和 Go 代码**，
@@ -317,6 +343,10 @@ sudo ufw enable
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
+| 启动失败：`缺少 OCI_MANAGER_ENCRYPTION_KEY` 或密钥过短 | 新版不再提供默认密钥。执行 `openssl rand -hex 32`，把结果写入 `.env` 的 `OCI_MANAGER_ENCRYPTION_KEY` 后重启；**注意别覆盖原有密钥**，否则已录入的账号无法解密 |
+| 升级后被退出登录，需要重新输一次密码 | 会话令牌改为摘要存储，旧会话作废。属预期行为 |
+| 配置证书后 HTTP 打不开或浏览器提示重定向循环 | 证书签发后 HTTP 会 308 跳 HTTPS。Cloudflare Flexible 回源 HTTP 的场景请在 compose 里加 `OCI_MANAGER_ALLOW_HTTP=true`，或改用 Full SSL |
+| 抢购任务日志出现「退避 … 后重试」 | OCI 返回 429 / 5xx / 超时，系统按设计暂停以避免触发风控，不是故障 |
 | `go mod download` 卡住或超时 | 国内 VPS 需要 GOPROXY 镜像，compose 里已配 `goproxy.cn`；仍慢可临时改成 `https://goproxy.io,direct` |
 | `npm ci` 报 lock 文件不匹配 | 本地改过 `package.json` 却没更新 `package-lock.json`，本机 `cd web && npm install` 后重新提交 |
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |

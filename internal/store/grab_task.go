@@ -119,23 +119,53 @@ func (s *Store) CreateGrabTask(in GrabTaskInput) (*GrabTask, error) {
 	if strings.TrimSpace(in.SubnetID) == "" {
 		return nil, errTaskField("子网 OCID 不能为空")
 	}
+	// 服务端强制 clamp：前端的 min/max 可以直接绕过，参数没有上限会
+	// 让单个任务在短时间内产生大量 OCI 写调用，触发官方风控。
 	if in.OCPUs <= 0 {
 		return nil, errTaskField("OCPU 数量必须大于 0")
+	}
+	if in.OCPUs > 64 {
+		return nil, errTaskField("OCPU 数量不能超过 64")
 	}
 	if in.MemoryGBs <= 0 {
 		return nil, errTaskField("内存容量必须大于 0")
 	}
+	if in.MemoryGBs > 512 {
+		return nil, errTaskField("内存容量不能超过 512 GB")
+	}
 	if in.InstanceCount <= 0 {
 		in.InstanceCount = 1
 	}
+	if in.InstanceCount > 10 {
+		return nil, errTaskField("单个任务的实例数量不能超过 10")
+	}
 	if in.IntervalSec <= 0 {
 		in.IntervalSec = 60
+	}
+	if in.IntervalSec < 30 {
+		in.IntervalSec = 30
+	}
+	if in.IntervalSec > 3600 {
+		in.IntervalSec = 3600
+	}
+	if in.MaxAttempts < 0 {
+		in.MaxAttempts = 0
+	}
+	if in.MaxAttempts > 100000 {
+		in.MaxAttempts = 100000
 	}
 	if in.Shape == "" {
 		in.Shape = "VM.Standard.A1.Flex"
 	}
 	if in.BootVolumeGBs <= 0 {
 		in.BootVolumeGBs = 50
+	}
+	if in.BootVolumeGBs > 1000 {
+		in.BootVolumeGBs = 1000
+	}
+	// 不依赖外键（连接池里 PRAGMA 未必逐连接生效），显式校验账号存在。
+	if _, err := s.GetAccount(in.AccountID); err != nil {
+		return nil, errTaskField("账号不存在或已被删除")
 	}
 
 	id, err := newID()

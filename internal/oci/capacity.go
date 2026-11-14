@@ -33,13 +33,13 @@ type CapacityQuery struct {
 
 // CapacityResult 是单个「可用域 / 故障域」组合的探测结果。
 type CapacityResult struct {
-	AvailabilityDomain string `json:"availability_domain"`
-	FaultDomain        string `json:"fault_domain"`
-	Shape              string `json:"shape"`
+	AvailabilityDomain string  `json:"availability_domain"`
+	FaultDomain        string  `json:"fault_domain"`
+	Shape              string  `json:"shape"`
 	OCPUs              float32 `json:"ocpus"`
 	MemoryGBs          float32 `json:"memory_gbs"`
-	AvailabilityStatus string `json:"availability_status"`
-	Available          bool   `json:"available"`
+	AvailabilityStatus string  `json:"availability_status"`
+	Available          bool    `json:"available"`
 	// AvailableCount 仅对 DRCC 客户与白名单租户返回，普通账户通常为 0。
 	// 因此判断有货一律以 AvailabilityStatus 为准，不要用这个字段。
 	AvailableCount *int64 `json:"available_count"`
@@ -72,8 +72,8 @@ func CheckCapacity(ctx context.Context, cs *ClientSet, q CapacityQuery) ([]Capac
 		ocpus := q.OCPUs
 		memory := q.MemoryGBs
 		shapeAvailability.InstanceShapeConfig = &core.CapacityReportInstanceShapeConfig{
-			Ocpus:        &ocpus,
-			MemoryInGBs:  &memory,
+			Ocpus:       &ocpus,
+			MemoryInGBs: &memory,
 		}
 	}
 
@@ -150,13 +150,21 @@ func IsCapacityReportUnsupported(err error) bool {
 	if err == nil {
 		return false
 	}
+	// 限流/5xx/超时绝不能算「接口不支持」，否则会退化成每轮直接创建。
+	if IsRateLimited(err) || IsTransientError(err) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
+	// markers 必须窄：过去 "not found"、"invalid parameter"、"compartment"
+	// 会把参数错误和网络错误误判为不支持，从而关掉预检、放大写请求。
 	markers := []string{
 		"not authorized", "notauthorized", "authorization failed",
-		"403", "404", "not found", "notfound",
-		"not supported", "notsupported", "unknown operation",
-		"invalid parameter", "invalidparameter",
-		"compartment", "capacity report",
+		"403", "404", "501", "notfound",
+		"not supported", "notsupported",
+		// SDK 的 service code 是驼峰连写，例如 UnknownOperation / NotSupported，
+		// 必须同时匹配连写形式，否则会被误判成暂时错误而一直退避。
+		"unknown operation", "unknownoperation",
+		"capacity report",
 	}
 	for _, m := range markers {
 		if strings.Contains(msg, m) {
@@ -189,4 +197,3 @@ func StatusLabel(status string) string {
 		return "状态未知"
 	}
 }
-

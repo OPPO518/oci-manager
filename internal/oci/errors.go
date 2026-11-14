@@ -1,8 +1,10 @@
 package oci
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -25,6 +27,64 @@ func IsCapacityError(err error) bool {
 	return strings.Contains(msg, "out of host capacity") ||
 		strings.Contains(msg, "out of capacity") ||
 		code == "outofhostcapacity"
+}
+
+// IsRateLimited 判断 OCI 是否正在限流（HTTP 429 / TooManyRequests）。
+func IsRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	var svcErr common.ServiceError
+	if errors.As(err, &svcErr) && svcErr.GetHTTPStatusCode() == 429 {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too many request") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "throttl") ||
+		strings.Contains(msg, "429")
+}
+
+// IsTransientError 判断是否为暂时性故障（限流、5xx、超时、连接重置）。
+// 这类错误必须退避暂停：既不能当成「没货」继续高频重试，也不能触发
+// 「关闭预检、每轮直创」的降级，否则 OCI 一开始限流就会把请求量放大。
+func IsTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsRateLimited(err) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var svcErr common.ServiceError
+	if errors.As(err, &svcErr) {
+		code := svcErr.GetHTTPStatusCode()
+		if code == 408 || code == 425 || code >= 500 {
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	// 很多包装错误已经丢失了 ServiceError 类型，只能从文本里识别 5xx。
+	for _, code := range []string{
+		"http 500", "http 502", "http 503", "http 504",
+		"status 500", "status 502", "status 503", "status 504",
+	} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "temporary failure") ||
+		strings.Contains(msg, "service unavailable")
 }
 
 // APIError 包装 OCI SDK 返回的错误。
