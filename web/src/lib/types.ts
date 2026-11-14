@@ -8,6 +8,8 @@ export interface Account {
   proxy_url: string
   created_at: string
   updated_at: string
+  /** 后端自动提供的演示账号：所有接口返回模拟数据，不发真实 OCI 请求 */
+  is_demo?: boolean
 }
 
 export interface AccountInput {
@@ -238,4 +240,215 @@ export interface TLSSettingsInput {
   email: string
   cf_api_token: string
   staging: boolean
+}
+
+/* ------------------------------------------------------------------
+   演示 / OTP / 审计日志
+   ------------------------------------------------------------------ */
+export interface DemoSettings {
+  enabled: boolean
+}
+
+/** 业务写操作统一携带的 OTP 字段 */
+export interface OtpPayload {
+  challenge: string
+  code: string
+}
+
+/** POST /otp/request 响应：演示账号下 demo_code 为 "123456" */
+export interface OtpRequestResult {
+  challenge: string
+  demo_code?: string
+}
+
+export interface AuditLog {
+  id: number
+  created_at: string
+  account_id: string
+  category: string
+  operation: string
+  target: string
+  result: string
+  detail: string
+  client_ip: string
+}
+
+/* ------------------------------------------------------------------
+   资源编辑 / 实例详情
+   ------------------------------------------------------------------ */
+export interface BootVolume {
+  id: string
+  display_name: string
+  size_gbs: number
+  vpus_per_gb: number
+  state: string
+  availability_domain: string
+  instance_id: string
+  compartment_id: string
+}
+
+export interface Vnic {
+  id: string
+  display_name: string
+  hostname_label: string
+  private_ip: string
+  public_ip: string
+  subnet_id: string
+  mac_address: string
+  state: string
+  instance_id: string
+}
+
+export interface PublicIp {
+  id: string
+  ip_address: string
+  display_name: string
+  lifetime: string
+  private_ip_id: string
+  state: string
+  compartment_id: string
+}
+
+export interface SecurityRule {
+  protocol: string
+  source: string
+  source_type: string
+  destination: string
+  destination_type: string
+  tcp_port_min?: number
+  tcp_port_max?: number
+  udp_port_min?: number
+  udp_port_max?: number
+  description: string
+  stateless: boolean
+}
+
+export interface SecurityList {
+  id: string
+  display_name: string
+  vcn_id: string
+  ingress_rules: SecurityRule[]
+  egress_rules: SecurityRule[]
+}
+
+export interface InstanceDetail {
+  instance: Instance
+  boot_volumes: BootVolume[]
+  vnics: Vnic[]
+  public_ips: PublicIp[]
+  security_lists: SecurityList[]
+}
+
+/* ------------------------------------------------------------------
+   公网 IP 更换护栏
+   ------------------------------------------------------------------ */
+export interface IpRotationSettings {
+  cooldown_sec: number
+  daily_limit: number
+  used_today: number
+  remaining_today: number
+  next_allowed_at: string
+}
+
+export interface RotateIpResult {
+  status: string
+  new_ip: PublicIp
+  message: string
+}
+
+/* ------------------------------------------------------------------
+   IAM（双钥匙 + 三道闸门）
+   ------------------------------------------------------------------ */
+export interface IamSettings {
+  enabled: boolean
+  mode: 'classic' | 'domains'
+  home_region: string
+  has_credential: boolean
+  credential_expires_at: string
+  telegram_ready: boolean
+  demo: boolean
+}
+
+export interface IamCredentialInput {
+  tenancy_ocid: string
+  user_ocid: string
+  fingerprint: string
+  private_key_pem: string
+  passphrase: string
+  region: string
+}
+
+export interface IAMUser {
+  id: string
+  name: string
+  description: string
+  email: string
+  state: string
+  time_created: string
+  can_use_console_password: boolean
+  db_user_name: string
+}
+
+export interface IAMGroup {
+  id: string
+  name: string
+  description: string
+  state: string
+  protected: boolean
+}
+
+export interface IAMMembership {
+  id: string
+  user_id: string
+  group_id: string
+}
+
+export interface IAMApiKey {
+  user_id: string
+  fingerprint: string
+  state: string
+  time_created: string
+  key_value?: string
+}
+
+export interface IAMLimit {
+  name: string
+  scope: string
+  available: number
+  used: number
+  total: number
+}
+
+export interface IAMOverview {
+  mode: string
+  home_region: string
+  users: IAMUser[]
+  groups: IAMGroup[]
+  memberships: IAMMembership[]
+  api_keys: IAMApiKey[]
+  limits: IAMLimit[]
+  protected_user_ids: string[]
+  read_only: boolean
+  hint: string
+}
+
+export interface IamUserResult {
+  user: IAMUser
+}
+
+export interface IamApiKeyResult {
+  api_key: IAMApiKey
+}
+
+export interface IamMembershipResult {
+  membership: IAMMembership
+}
+
+export interface IamPasswordResult {
+  password: string
+  hint: string
+}
+
+export interface StatusResult {
+  status: string
 }

@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// DemoAccountID 是内置演示账号的固定 ID。
+// 它是一条真实的数据库记录（让抢购任务的外键约束成立），但所有 OCI 调用
+// 都会在客户端池里被短路到内存模拟数据，绝不发出网络请求。
+const DemoAccountID = "demo-account"
+
 // Account 是一个 OCI 账号的公开信息，不含私钥等敏感内容。
 type Account struct {
 	ID          string    `json:"id"`
@@ -18,8 +23,44 @@ type Account struct {
 	Fingerprint string    `json:"fingerprint"`
 	Region      string    `json:"region"`
 	ProxyURL    string    `json:"proxy_url"`
+	IsDemo      bool      `json:"is_demo"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// demoEnabled 读取演示模式开关，默认开启；未写入设置时视为启用。
+func (s *Store) demoEnabled() bool {
+	v, err := s.GetSetting("demo_enabled")
+	if err != nil || v == "" {
+		return true
+	}
+	return v != "false"
+}
+
+// seedDemoAccount 保证演示账号始终存在。删除或库损坏后重启会自动补回，
+// 且不会覆盖用户自己修改过的任何真实账号。
+func (s *Store) seedDemoAccount() error {
+	placeholder, err := s.sealer.Encrypt("DEMO-ACCOUNT-NO-PRIVATE-KEY")
+	if err != nil {
+		return fmt.Errorf("初始化演示账号失败: %w", err)
+	}
+	ts := now().Format(time.RFC3339)
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO accounts
+		(id, name, tenancy_ocid, user_ocid, fingerprint, region,
+		 private_key, key_passphrase, proxy_url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		DemoAccountID,
+		"演示账号（不发真实 OCI 请求）",
+		"ocid1.tenancy.oc1..demo",
+		"ocid1.user.oc1..demo-api-user",
+		"demo:no:real:credential",
+		"ap-tokyo-1",
+		placeholder, placeholder, "", ts, ts,
+	)
+	if err != nil {
+		return fmt.Errorf("初始化演示账号失败: %w", err)
+	}
+	return nil
 }
 
 // AccountSecret 是账号的敏感凭据，存储时加密、读取时解密。
@@ -62,6 +103,7 @@ func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 	}
 	a.CreatedAt = parseTime(createdAt)
 	a.UpdatedAt = parseTime(updatedAt)
+	a.IsDemo = a.ID == DemoAccountID
 	return &a, nil
 }
 
@@ -82,19 +124,37 @@ func (s *Store) ListAccounts() ([]Account, error) {
 	}
 	defer rows.Close()
 
+	showDemo := s.demoEnabled()
 	accounts := make([]Account, 0)
+	var demo *Account
 	for rows.Next() {
 		a, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
 		}
+		if a.IsDemo {
+			if showDemo {
+				demo = a
+			}
+			continue
+		}
 		accounts = append(accounts, *a)
 	}
-	return accounts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// 演示账号排在最前：用户未录入任何真实凭证时，一登录就能零风险试用。
+	if demo != nil {
+		accounts = append([]Account{*demo}, accounts...)
+	}
+	return accounts, nil
 }
 
 // GetAccount 按 ID 取账号。
 func (s *Store) GetAccount(id string) (*Account, error) {
+	if id == DemoAccountID && !s.demoEnabled() {
+		return nil, ErrNotFound
+	}
 	row := s.db.QueryRow(`SELECT `+accountColumns+` FROM accounts WHERE id = ?`, id)
 	a, err := scanAccount(row)
 	if err == sql.ErrNoRows {
@@ -133,6 +193,9 @@ func (s *Store) CreateAccount(in AccountInput) (*Account, error) {
 
 // UpdateAccount 更新账号。KeepExistingKey 为 true 时不动私钥字段。
 func (s *Store) UpdateAccount(id string, in AccountInput) (*Account, error) {
+	if id == DemoAccountID {
+		return nil, fmt.Errorf("演示账号不可修改，请在设置中关闭演示模式或添加真实账号")
+	}
 	if err := validateAccountInput(in, in.KeepExistingKey); err != nil {
 		return nil, err
 	}
@@ -173,6 +236,9 @@ func (s *Store) UpdateAccount(id string, in AccountInput) (*Account, error) {
 
 // DeleteAccount 删除账号及其关联任务。
 func (s *Store) DeleteAccount(id string) error {
+	if id == DemoAccountID {
+		return fmt.Errorf("演示账号不可删除，可在设置中关闭演示模式")
+	}
 	res, err := s.db.Exec(`DELETE FROM accounts WHERE id = ?`, id)
 	if err != nil {
 		return err

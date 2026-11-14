@@ -31,6 +31,7 @@ type Server struct {
 	engine   *gin.Engine
 	staticFS http.FileSystem
 	limiter  *ipRateLimiter
+	iamVault *iamVault
 }
 
 // New 构造 HTTP 服务。
@@ -48,6 +49,7 @@ func New(
 	s := &Server{
 		cfg: cfg, store: st, pool: pool, grabber: gm,
 		auth: authSvc, notify: notifySvc, tlsMgr: tlsMgr,
+		iamVault: newIAMVault(),
 	}
 
 	if cfg.WebDir != "" {
@@ -131,6 +133,43 @@ func (s *Server) registerRoutes() {
 		api.POST("/grab-tasks/:id/start", s.startGrabTask)
 		api.POST("/grab-tasks/:id/stop", s.stopGrabTask)
 		api.GET("/grab-tasks/:id/logs", s.grabTaskLogs)
+
+		// 演示模式、通用验证码、审计日志与保护策略
+		api.GET("/settings/demo", s.getDemo)
+		api.PUT("/settings/demo", s.saveDemo)
+		api.POST("/otp/request", s.requestOTP)
+		api.GET("/audit-logs", s.listAuditLogs)
+		api.GET("/settings/ip-rotation", s.getIPRotation)
+		api.PUT("/settings/ip-rotation", s.saveIPRotation)
+
+		// IAM：双钥匙 + 三道闸门
+		api.GET("/settings/iam", s.getIAMSettings)
+		api.PUT("/settings/iam", s.saveIAMSettings)
+		api.POST("/settings/iam/credential", s.setIAMCredential)
+		api.DELETE("/settings/iam/credential", s.deleteIAMCredential)
+
+		// 资源编辑与网络
+		api.GET("/accounts/:id/instances/:instanceId/detail", s.instanceDetail)
+		api.PUT("/accounts/:id/instances/:instanceId/display-name", s.renameInstance)
+		api.GET("/accounts/:id/boot-volumes", s.listBootVolumes)
+		api.PUT("/accounts/:id/boot-volumes/:volumeId", s.updateBootVolume)
+		api.GET("/accounts/:id/vnics", s.listVnics)
+		api.PUT("/accounts/:id/vnics/:vnicId", s.updateVnic)
+		api.GET("/accounts/:id/security-lists", s.listSecurityLists)
+		api.PUT("/accounts/:id/security-lists/:listId", s.updateSecurityList)
+		api.GET("/accounts/:id/public-ips", s.listPublicIPs)
+		api.POST("/accounts/:id/public-ips/rotate", s.rotatePublicIP)
+
+		// 身份与权限（IAM）
+		api.GET("/accounts/:id/iam/overview", s.iamOverview)
+		api.POST("/accounts/:id/iam/users", s.iamCreateUser)
+		api.PUT("/accounts/:id/iam/users/:userId", s.iamUpdateUser)
+		api.DELETE("/accounts/:id/iam/users/:userId", s.iamDeleteUser)
+		api.POST("/accounts/:id/iam/users/:userId/password", s.iamResetPassword)
+		api.POST("/accounts/:id/iam/users/:userId/api-keys", s.iamCreateAPIKey)
+		api.DELETE("/accounts/:id/iam/users/:userId/api-keys/:fingerprint", s.iamDeleteAPIKey)
+		api.POST("/accounts/:id/iam/groups/:groupId/members", s.iamAddMember)
+		api.DELETE("/accounts/:id/iam/groups/:groupId/members/:userId", s.iamRemoveMember)
 	}
 
 	// 其余路径交给前端单页应用

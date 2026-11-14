@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Badge, Card, ErrorBanner, Field, Notice, SuccessBanner, Switch } from '../components/ui'
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  Field,
+  Icon,
+  Loading,
+  Notice,
+  SuccessBanner,
+  Switch,
+} from '../components/ui'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
-import { formatDateTime } from '../lib/format'
-import type { TelegramSettings, TLSSettings } from '../lib/types'
+import { formatDateTime, truncate } from '../lib/format'
+import type { AuditLog, IpRotationSettings, TelegramSettings, TLSSettings } from '../lib/types'
 
-type Tab = 'telegram' | 'grabber' | 'tls' | 'password'
+type Tab = 'telegram' | 'grabber' | 'tls' | 'password' | 'demo' | 'ipRotation' | 'audit'
 
 const EMPTY_TG: TelegramSettings = {
   enabled: false,
@@ -59,10 +70,30 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
 
+  // ---- 演示模式 ----
+  const [demoEnabled, setDemoEnabled] = useState(false)
+  const [savingDemo, setSavingDemo] = useState(false)
+
+  // ---- 换 IP 保护策略 ----
+  const [rotation, setRotation] = useState<IpRotationSettings | null>(null)
+  const [rotationForm, setRotationForm] = useState({ cooldown_sec: 300, daily_limit: 5 })
+  const [savingRotation, setSavingRotation] = useState(false)
+
+  // ---- 审计日志 ----
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.telegram.get(), api.precheck.get(), api.tls.get()])
-      .then(([t, p, h]) => {
+    Promise.all([
+      api.telegram.get(),
+      api.precheck.get(),
+      api.tls.get(),
+      api.demo.get(),
+      api.ipRotation.get(),
+      api.audit.list(100),
+    ])
+      .then(([t, p, h, d, r, a]) => {
         if (cancelled) return
         setTg(t)
         setPrecheck(p.enabled)
@@ -70,6 +101,10 @@ export default function Settings() {
         setTlsDomain(h.domain)
         setTlsEmail(h.email)
         setTlsStaging(h.staging)
+        setDemoEnabled(d.enabled)
+        setRotation(r)
+        setRotationForm({ cooldown_sec: r.cooldown_sec, daily_limit: r.daily_limit })
+        setAuditLogs(a)
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message)
@@ -191,11 +226,59 @@ export default function Settings() {
     }
   }
 
+  async function saveDemo(enabled: boolean) {
+    setSavingDemo(true)
+    setError('')
+    setNotice('')
+    try {
+      const res = await api.demo.set(enabled)
+      setDemoEnabled(res.enabled)
+      setNotice(res.enabled ? '演示模式已开启' : '演示模式已关闭')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSavingDemo(false)
+    }
+  }
+
+  async function saveRotation() {
+    setSavingRotation(true)
+    setError('')
+    setNotice('')
+    try {
+      const res = await api.ipRotation.save({
+        cooldown_sec: rotationForm.cooldown_sec,
+        daily_limit: rotationForm.daily_limit,
+      })
+      setRotation(res)
+      setNotice('换 IP 保护策略已保存')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSavingRotation(false)
+    }
+  }
+
+  async function loadAudit() {
+    setAuditLoading(true)
+    setError('')
+    try {
+      setAuditLogs(await api.audit.list(100))
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
   const TABS: { id: Tab; label: string }[] = [
     { id: 'telegram', label: 'Telegram 通知' },
     { id: 'grabber', label: '抢购策略' },
     { id: 'tls', label: 'HTTPS 证书' },
     { id: 'password', label: '修改密码' },
+    { id: 'demo', label: '演示模式' },
+    { id: 'ipRotation', label: '换 IP 保护' },
+    { id: 'audit', label: '审计日志' },
   ]
 
   return (
@@ -494,6 +577,171 @@ export default function Settings() {
               {savingPassword ? '保存中…' : '修改密码'}
             </button>
           </form>
+        </Card>
+      )}
+
+      {/* ---------------- 演示模式 ---------------- */}
+      {tab === 'demo' && (
+        <Card title="演示模式">
+          <div className="max-w-2xl space-y-4">
+            <Notice tone="info">
+              开启后，账号列表会自动提供演示账号（demo-account）：所有接口返回模拟数据，
+              不会发出任何真实 OCI 请求，验证码固定为 123456，可放心试用全部页面与交互。
+            </Notice>
+            <Switch
+              checked={demoEnabled}
+              disabled={savingDemo}
+              onChange={(c) => void saveDemo(c)}
+              label="启用演示模式"
+            />
+            <dl className="grid grid-cols-1 gap-3 border-t border-oracle-border pt-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-oracle-muted">当前状态</dt>
+                <dd className="mt-1">
+                  <Badge tone={demoEnabled ? 'success' : 'neutral'}>
+                    {demoEnabled ? '已开启' : '已关闭'}
+                  </Badge>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-oracle-muted">演示账号 ID</dt>
+                <dd className="mt-1 font-mono text-xs">demo-account</dd>
+              </div>
+            </dl>
+          </div>
+        </Card>
+      )}
+
+      {/* ---------------- 换 IP 保护策略 ---------------- */}
+      {tab === 'ipRotation' && (
+        <Card title="换 IP 保护策略">
+          <div className="max-w-2xl space-y-4">
+            <Notice tone="info">
+              更换公网 IP 受冷却时间与每日次数限制，且需要二次验证。此处调整的策略对所有账号生效。
+            </Notice>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="冷却时间（秒）">
+                <input
+                  type="number"
+                  min={0}
+                  className="oci-input"
+                  value={rotationForm.cooldown_sec}
+                  onChange={(e) =>
+                    setRotationForm((f) => ({ ...f, cooldown_sec: Number(e.target.value) }))
+                  }
+                />
+              </Field>
+              <Field label="每日次数上限">
+                <input
+                  type="number"
+                  min={0}
+                  className="oci-input"
+                  value={rotationForm.daily_limit}
+                  onChange={(e) =>
+                    setRotationForm((f) => ({ ...f, daily_limit: Number(e.target.value) }))
+                  }
+                />
+              </Field>
+            </div>
+            <button
+              type="button"
+              className="oci-btn-primary"
+              disabled={savingRotation}
+              onClick={() => void saveRotation()}
+            >
+              {savingRotation ? '保存中…' : '保存策略'}
+            </button>
+            {rotation && (
+              <dl className="grid grid-cols-2 gap-3 border-t border-oracle-border pt-4 text-sm sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs text-oracle-muted">今日已用</dt>
+                  <dd className="mt-1">{rotation.used_today}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-oracle-muted">今日剩余</dt>
+                  <dd className="mt-1">{rotation.remaining_today}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-oracle-muted">每日上限</dt>
+                  <dd className="mt-1">{rotation.daily_limit}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-oracle-muted">下次允许时间</dt>
+                  <dd className="mt-1 text-xs">{formatDateTime(rotation.next_allowed_at)}</dd>
+                </div>
+              </dl>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* ---------------- 审计日志 ---------------- */}
+      {tab === 'audit' && (
+        <Card
+          title="审计日志（最近 50 条）"
+          extra={
+            <button
+              type="button"
+              className="oci-btn-secondary"
+              disabled={auditLoading}
+              onClick={() => void loadAudit()}
+            >
+              <Icon name="refresh" size={15} />
+              刷新
+            </button>
+          }
+          bodyClassName="oci-card-body--flush"
+        >
+          {auditLoading && auditLogs.length === 0 ? (
+            <div className="p-6">
+              <Loading />
+            </div>
+          ) : auditLogs.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <div className="oci-table-wrap">
+              <table className="oci-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>分类</th>
+                    <th>操作</th>
+                    <th>目标</th>
+                    <th>结果</th>
+                    <th>详情</th>
+                    <th>账号</th>
+                    <th>客户端 IP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogs.slice(0, 50).map((log) => (
+                    <tr key={log.id}>
+                      <td className="text-xs text-oracle-muted">{formatDateTime(log.created_at)}</td>
+                      <td className="text-xs">{log.category}</td>
+                      <td className="font-mono text-xs">{log.operation}</td>
+                      <td className="font-mono text-xs" title={log.target}>
+                        {truncate(log.target, 18, 0)}
+                      </td>
+                      <td>
+                        <Badge
+                          tone={
+                            /fail|deny|error/i.test(log.result) ? 'danger' : 'success'
+                          }
+                        >
+                          {log.result}
+                        </Badge>
+                      </td>
+                      <td className="text-xs">{log.detail || '—'}</td>
+                      <td className="font-mono text-xs" title={log.account_id}>
+                        {truncate(log.account_id, 14, 0)}
+                      </td>
+                      <td className="font-mono text-xs">{log.client_ip || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
     </div>

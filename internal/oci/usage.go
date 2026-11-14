@@ -27,8 +27,8 @@ type UsagePoint struct {
 type UsageQuery struct {
 	TenancyID string
 	// Start 与 End 为查询区间，End 会被调整为次日零点以覆盖当天。
-	Start    time.Time
-	End      time.Time
+	Start time.Time
+	End   time.Time
 	// Granularity 取 hourly / daily / monthly / total。
 	Granularity string
 	// GroupBy 为聚合维度，例如 []string{"service"} 或 []string{"service", "region"}。
@@ -37,6 +37,9 @@ type UsageQuery struct {
 
 // QueryCost 查询指定区间的成本，按维度聚合。
 func QueryCost(ctx context.Context, cs *ClientSet, q UsageQuery) ([]UsagePoint, error) {
+	if cs.IsDemo() {
+		return cs.Demo.queryCost(), nil
+	}
 	granularity, err := parseGranularity(q.Granularity)
 	if err != nil {
 		return nil, err
@@ -47,11 +50,11 @@ func QueryCost(ctx context.Context, cs *ClientSet, q UsageQuery) ([]UsagePoint, 
 
 	isAggregate := true
 	details := usageapi.RequestSummarizedUsagesDetails{
-		TenantId:         &q.TenancyID,
-		TimeUsageStarted: &start,
-		TimeUsageEnded:   &end,
-		Granularity:      granularity,
-		QueryType:        usageapi.RequestSummarizedUsagesDetailsQueryTypeCost,
+		TenantId:          &q.TenancyID,
+		TimeUsageStarted:  &start,
+		TimeUsageEnded:    &end,
+		Granularity:       granularity,
+		QueryType:         usageapi.RequestSummarizedUsagesDetailsQueryTypeCost,
 		IsAggregateByTime: &isAggregate,
 	}
 	if len(q.GroupBy) > 0 {

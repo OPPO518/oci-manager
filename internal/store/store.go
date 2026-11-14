@@ -161,13 +161,27 @@ func (s *Store) migrate() error {
 			attempts   INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_login_challenges_expires ON login_challenges(expires_at);`,
+
+		// 敏感写操作的追加式审计记录。只提供 INSERT 与 SELECT，接口层不暴露删除。
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			created_at  DATETIME NOT NULL,
+			account_id  TEXT NOT NULL DEFAULT '',
+			category    TEXT NOT NULL,
+			operation   TEXT NOT NULL,
+			target      TEXT NOT NULL DEFAULT '',
+			result      TEXT NOT NULL,
+			detail      TEXT NOT NULL DEFAULT '',
+			client_ip   TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("建表失败: %w", err)
 		}
 	}
-	return nil
+	return s.seedDemoAccount()
 }
 
 // now 统一时间来源，便于测试替换。

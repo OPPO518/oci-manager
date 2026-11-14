@@ -1,18 +1,37 @@
 import type {
   Account,
   AccountInput,
+  AuditLog,
   AuthStatus,
+  BootVolume,
   CapacityQueryInput,
   CapacityResponse,
   Compartment,
+  DemoSettings,
   GrabTask,
   GrabTaskInput,
   GrabTaskLog,
+  IAMOverview,
+  IamApiKeyResult,
+  IamCredentialInput,
+  IamMembershipResult,
+  IamPasswordResult,
+  IamSettings,
+  IamUserResult,
   Image,
   Instance,
+  InstanceDetail,
+  IpRotationSettings,
   LoginResult,
+  OtpPayload,
+  OtpRequestResult,
   Overview,
+  PublicIp,
   Region,
+  RotateIpResult,
+  SecurityList,
+  SecurityRule,
+  StatusResult,
   Subnet,
   TelegramSettings,
   TelegramSettingsInput,
@@ -20,6 +39,7 @@ import type {
   TLSSettingsInput,
   TestResult,
   UsagePoint,
+  Vnic,
 } from './types'
 
 const BASE = '/api'
@@ -77,6 +97,9 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 }
+
+/** 资源类接口通用的区域 / 区间过滤参数 */
+type ResourceParams = { region?: string; compartment_id?: string }
 
 export const api = {
   auth: {
@@ -166,6 +189,11 @@ export const api = {
       request<Subnet[]>(`/accounts/${accountId}/subnets${query(params)}`),
     images: (accountId: string, params: { region?: string; compartment_id?: string }) =>
       request<Image[]>(`/accounts/${accountId}/images${query(params)}`),
+    /** 资源详情聚合视图：实例 + 引导卷 + VNIC + 公网 IP + 安全列表 */
+    detail: (accountId: string, instanceId: string, params: ResourceParams = {}) =>
+      request<InstanceDetail>(
+        `/accounts/${accountId}/instances/${instanceId}/detail${query(params)}`,
+      ),
   },
 
   instances: {
@@ -199,6 +227,15 @@ export const api = {
         })}`,
         { method: 'DELETE' },
       ),
+    rename: (accountId: string, instanceId: string, displayName: string, region?: string) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/instances/${instanceId}/display-name${query({ region })}`,
+        { method: 'PUT', body: JSON.stringify({ display_name: displayName }) },
+      ),
+    detail: (accountId: string, instanceId: string, params: ResourceParams = {}) =>
+      request<InstanceDetail>(
+        `/accounts/${accountId}/instances/${instanceId}/detail${query(params)}`,
+      ),
   },
 
   cost: {
@@ -221,6 +258,174 @@ export const api = {
     logs: (id: string, after?: number, limit?: number) =>
       request<GrabTaskLog[]>(
         `/grab-tasks/${id}/logs${query({ after: after?.toString(), limit: limit?.toString() })}`,
+      ),
+  },
+
+  /* ----------------------------------------------------------------
+     演示模式 / OTP / 审计日志
+     ---------------------------------------------------------------- */
+  demo: {
+    get: () => request<DemoSettings>('/settings/demo'),
+    set: (enabled: boolean) =>
+      request<DemoSettings>('/settings/demo', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+  },
+
+  otp: {
+    request: (operation: string, summary: string, demo = false) =>
+      request<OtpRequestResult>('/otp/request', {
+        method: 'POST',
+        body: JSON.stringify({ operation, summary, demo }),
+      }),
+  },
+
+  audit: {
+    list: (limit = 100) =>
+      request<AuditLog[]>(`/audit-logs${query({ limit: String(limit) })}`),
+  },
+
+  /* ----------------------------------------------------------------
+     引导卷
+     ---------------------------------------------------------------- */
+  storage: {
+    bootVolumes: (accountId: string, params: ResourceParams = {}) =>
+      request<BootVolume[]>(`/accounts/${accountId}/boot-volumes${query(params)}`),
+    updateBootVolume: (
+      accountId: string,
+      volumeId: string,
+      body: { display_name?: string; size_gbs?: number; vpus_per_gb?: number },
+      params: ResourceParams = {},
+    ) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/boot-volumes/${volumeId}${query(params)}`,
+        { method: 'PUT', body: JSON.stringify(body) },
+      ),
+  },
+
+  /* ----------------------------------------------------------------
+     网络：VNIC / 安全列表 / 公网 IP
+     ---------------------------------------------------------------- */
+  network: {
+    vnics: (accountId: string, params: ResourceParams = {}) =>
+      request<Vnic[]>(`/accounts/${accountId}/vnics${query(params)}`),
+    updateVnic: (
+      accountId: string,
+      vnicId: string,
+      body: { display_name?: string; hostname_label?: string },
+      params: ResourceParams = {},
+    ) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/vnics/${vnicId}${query(params)}`,
+        { method: 'PUT', body: JSON.stringify(body) },
+      ),
+    securityLists: (accountId: string, params: ResourceParams = {}) =>
+      request<SecurityList[]>(`/accounts/${accountId}/security-lists${query(params)}`),
+    updateSecurityList: (
+      accountId: string,
+      listId: string,
+      body: { ingress_rules: SecurityRule[]; egress_rules: SecurityRule[] },
+      params: ResourceParams = {},
+    ) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/security-lists/${listId}${query(params)}`,
+        { method: 'PUT', body: JSON.stringify(body) },
+      ),
+    publicIps: (accountId: string) =>
+      request<PublicIp[]>(`/accounts/${accountId}/public-ips`),
+    rotateIp: (accountId: string, body: { private_ip_id: string; otp: OtpPayload }) =>
+      request<RotateIpResult>(`/accounts/${accountId}/public-ips/rotate`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+  },
+
+  /* ----------------------------------------------------------------
+     换 IP 保护策略
+     ---------------------------------------------------------------- */
+  ipRotation: {
+    get: () => request<IpRotationSettings>('/settings/ip-rotation'),
+    save: (body: { cooldown_sec: number; daily_limit: number }) =>
+      request<IpRotationSettings>('/settings/ip-rotation', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+  },
+
+  /* ----------------------------------------------------------------
+     IAM（双钥匙 + 三道闸门）
+     ---------------------------------------------------------------- */
+  iam: {
+    settings: () => request<IamSettings>('/settings/iam'),
+    saveSettings: (body: { enabled: boolean; mode?: string; home_region?: string }) =>
+      request<IamSettings>('/settings/iam', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    credential: (body: IamCredentialInput) =>
+      request<IamSettings>('/settings/iam/credential', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteCredential: () =>
+      request<StatusResult>('/settings/iam/credential', { method: 'DELETE' }),
+    overview: (accountId: string) =>
+      request<IAMOverview>(`/accounts/${accountId}/iam/overview`),
+    createUser: (
+      accountId: string,
+      body: { name: string; description: string; email: string; otp: OtpPayload },
+    ) =>
+      request<IamUserResult>(`/accounts/${accountId}/iam/users`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateUser: (
+      accountId: string,
+      userId: string,
+      body: { description?: string; email?: string; disabled?: boolean; otp: OtpPayload },
+    ) =>
+      request<IamUserResult>(`/accounts/${accountId}/iam/users/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteUser: (accountId: string, userId: string, otp: OtpPayload) =>
+      request<StatusResult>(`/accounts/${accountId}/iam/users/${userId}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ otp }),
+      }),
+    resetPassword: (accountId: string, userId: string, otp: OtpPayload) =>
+      request<IamPasswordResult>(`/accounts/${accountId}/iam/users/${userId}/password`, {
+        method: 'POST',
+        body: JSON.stringify({ otp }),
+      }),
+    createApiKey: (
+      accountId: string,
+      userId: string,
+      body: { public_key_pem: string; otp: OtpPayload },
+    ) =>
+      request<IamApiKeyResult>(`/accounts/${accountId}/iam/users/${userId}/api-keys`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteApiKey: (accountId: string, userId: string, fingerprint: string, otp: OtpPayload) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/iam/users/${userId}/api-keys/${fingerprint}`,
+        { method: 'DELETE', body: JSON.stringify({ otp }) },
+      ),
+    addMember: (
+      accountId: string,
+      groupId: string,
+      body: { user_id: string; otp: OtpPayload },
+    ) =>
+      request<IamMembershipResult>(`/accounts/${accountId}/iam/groups/${groupId}/members`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    removeMember: (accountId: string, groupId: string, userId: string, otp: OtpPayload) =>
+      request<StatusResult>(
+        `/accounts/${accountId}/iam/groups/${groupId}/members/${userId}`,
+        { method: 'DELETE', body: JSON.stringify({ otp }) },
       ),
   },
 }

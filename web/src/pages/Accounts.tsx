@@ -139,6 +139,9 @@ export default function Accounts() {
         <p className="mb-3 text-xs text-oracle-muted">
           每个账号可以单独指定出口代理（http / https / socks5），避免多个账号共用同一 IP 触发风控。
         </p>
+        <Notice tone="warning" className="mb-3">
+          启用 HTTPS 前不要录入真实凭证；演示账号由系统提供，不会发出任何真实 OCI 请求，可放心试用全部功能。
+        </Notice>
 
         {accounts.length === 0 ? (
           <EmptyState />
@@ -160,7 +163,17 @@ export default function Accounts() {
                 <tbody>
                   {paged.map((item) => (
                     <tr key={item.id}>
-                      <td className="font-medium">{item.name}</td>
+                      <td className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {item.name}
+                          {item.is_demo && <Badge tone="info">演示</Badge>}
+                        </div>
+                        {item.is_demo && (
+                          <div className="mt-1 text-xs font-normal text-oracle-muted">
+                            不发真实 OCI 请求，可放心试用
+                          </div>
+                        )}
+                      </td>
                       <td className="text-xs">{item.region}</td>
                       <td>
                         {item.proxy_url ? (
@@ -179,16 +192,18 @@ export default function Accounts() {
                             items={[
                               {
                                 label: testing === item.id ? '测试中…' : '测试连接',
-                                disabled: testing === item.id,
+                                disabled: testing === item.id || item.is_demo === true,
                                 onSelect: () => void test(item),
                               },
                               {
                                 label: '编辑',
+                                disabled: item.is_demo === true,
                                 onSelect: () => openEdit(item),
                               },
                               {
                                 label: '删除',
                                 danger: true,
+                                disabled: item.is_demo === true,
                                 separatorBefore: true,
                                 onSelect: () => void remove(item),
                               },

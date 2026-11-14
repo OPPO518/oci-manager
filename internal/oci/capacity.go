@@ -53,6 +53,12 @@ type CapacityResult struct {
 // 高风险写调用。用它做抢购前的预检，可以把大量注定失败的创建请求过滤掉，
 // 从而显著降低触发风控的概率。
 func CheckCapacity(ctx context.Context, cs *ClientSet, q CapacityQuery) ([]CapacityResult, error) {
+	if cs.IsDemo() {
+		if strings.TrimSpace(q.Shape) == "" {
+			q.Shape = "VM.Standard.A1.Flex"
+		}
+		return cs.Demo.checkCapacity(q), nil
+	}
 	shape := strings.TrimSpace(q.Shape)
 	if shape == "" {
 		shape = "VM.Standard.A1.Flex"

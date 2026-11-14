@@ -47,6 +47,14 @@ export type IconName =
   | 'storage'
   | 'eye'
   | 'sliders'
+  | 'key'
+  | 'trash'
+  | 'copy'
+  | 'edit'
+  | 'rotate'
+  | 'users'
+  | 'lock'
+  | 'eye-off'
 
 /** Redwood 线性图标，默认 16px。 */
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
@@ -241,6 +249,53 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
         <circle cx="8.5" cy="4" r="1.3" />
         <circle cx="12" cy="8" r="1.3" />
         <circle cx="6.5" cy="12" r="1.3" />
+      </>
+    ),
+    key: (
+      <>
+        <circle cx="5.5" cy="10.5" r="2.6" />
+        <path d="M7.4 8.6L13 3M11.2 4.8l2 2M9.4 6.6l2 2" />
+      </>
+    ),
+    trash: <path d="M3 5h10M6 5V3h4v2M4 5l1 9h6l1-9M6.5 8v4M9.5 8v4" />,
+    copy: (
+      <>
+        <rect x="5" y="5" width="9" height="9" rx="1" />
+        <path d="M11 5V3H3v8h2" />
+      </>
+    ),
+    edit: (
+      <>
+        <path d="M3 13h10" />
+        <path d="M9.5 3.5l3 3-6.5 6.5-3 .8.8-3 5.7-7.3z" />
+      </>
+    ),
+    rotate: (
+      <>
+        <path d="M12.8 6A5 5 0 113.5 9.5" />
+        <path d="M12.8 2.5v3.5H9.3" />
+      </>
+    ),
+    users: (
+      <>
+        <circle cx="6" cy="5.5" r="2.2" />
+        <path d="M1.5 14c0-2.8 2-4.3 4.5-4.3S10.5 11.2 10.5 14" />
+        <circle cx="11.6" cy="6" r="1.7" />
+        <path d="M10.2 10.3c2.4-.2 4.3 1.1 4.3 3.7" />
+      </>
+    ),
+    lock: (
+      <>
+        <rect x="3" y="7" width="10" height="7" rx="1" />
+        <path d="M5.5 7V5a2.5 2.5 0 015 0v2" />
+      </>
+    ),
+    'eye-off': (
+      <>
+        <path d="M2 2l12 12" />
+        <path d="M6.4 6.5A2 2 0 008 10c.5 0 1-.2 1.4-.5" />
+        <path d="M4 4.7C2.5 5.8 1.5 8 1.5 8s2.5 4.5 6.5 4.5c1 0 1.9-.2 2.7-.6" />
+        <path d="M11.6 10.8c1.4-1 2.9-2.8 2.9-2.8S12 3.5 8 3.5c-.5 0-1 .1-1.4.2" />
       </>
     ),
   }

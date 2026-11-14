@@ -41,6 +41,9 @@ type LaunchParams struct {
 
 // ListInstances 列出区间下的全部计算实例。
 func ListInstances(ctx context.Context, cs *ClientSet, compartmentID string) ([]Instance, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listInstances(compartmentID), nil
+	}
 	var (
 		instances []Instance
 		page      *string
@@ -106,6 +109,9 @@ func convertInstance(item core.Instance) Instance {
 // InstanceAction 对实例执行电源类操作。
 // action 取值为 start / stop / softstop / reset / softreset。
 func InstanceAction(ctx context.Context, cs *ClientSet, instanceID, action string) error {
+	if cs.IsDemo() {
+		return cs.Demo.instanceAction(instanceID, action)
+	}
 	parsed, err := parseInstanceAction(action)
 	if err != nil {
 		return err
@@ -143,6 +149,9 @@ func UpdateInstanceShape(ctx context.Context, cs *ClientSet, instanceID string, 
 	if ocpus <= 0 || memoryGBs <= 0 {
 		return fmt.Errorf("OCPU 与内存容量必须大于 0")
 	}
+	if cs.IsDemo() {
+		return cs.Demo.updateInstanceShape(instanceID, ocpus, memoryGBs)
+	}
 	_, err := cs.Compute.UpdateInstance(ctx, core.UpdateInstanceRequest{
 		InstanceId: &instanceID,
 		UpdateInstanceDetails: core.UpdateInstanceDetails{
@@ -160,8 +169,11 @@ func UpdateInstanceShape(ctx context.Context, cs *ClientSet, instanceID string, 
 
 // TerminateInstance 终止实例。preserveBootVolume 为 true 时保留启动卷。
 func TerminateInstance(ctx context.Context, cs *ClientSet, instanceID string, preserveBootVolume bool) error {
+	if cs.IsDemo() {
+		return cs.Demo.terminateInstance(instanceID, preserveBootVolume)
+	}
 	_, err := cs.Compute.TerminateInstance(ctx, core.TerminateInstanceRequest{
-		InstanceId:        &instanceID,
+		InstanceId:         &instanceID,
 		PreserveBootVolume: &preserveBootVolume,
 	})
 	if err != nil {
@@ -173,6 +185,9 @@ func TerminateInstance(ctx context.Context, cs *ClientSet, instanceID string, pr
 // LaunchInstance 创建一台实例。返回新实例的 ID。
 // 当可用域资源不足时返回的错误可被 IsCapacityError 识别。
 func LaunchInstance(ctx context.Context, cs *ClientSet, p LaunchParams) (*Instance, error) {
+	if cs.IsDemo() {
+		return cs.Demo.launchInstance(p)
+	}
 	if p.AvailabilityDomain == "" || p.CompartmentID == "" {
 		return nil, fmt.Errorf("可用域与区间 OCID 不能为空")
 	}

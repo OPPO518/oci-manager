@@ -9,8 +9,10 @@ import Accounts from './pages/Accounts'
 import Capacity from './pages/Capacity'
 import Cost from './pages/Cost'
 import Grabber from './pages/Grabber'
+import Identity from './pages/Identity'
 import Instances from './pages/Instances'
 import Login from './pages/Login'
+import Network from './pages/Network'
 import Overview from './pages/Overview'
 import Settings from './pages/Settings'
 
@@ -47,6 +49,8 @@ function Shell() {
             <Route path="/cost" element={<Cost />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/network" element={<Network />} />
+            <Route path="/identity" element={<Identity />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         </Layout>

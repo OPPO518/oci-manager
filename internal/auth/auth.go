@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,10 @@ const (
 	otpTTL = 5 * time.Minute
 	// maxOTPAttempts 是单个验证码允许的错误次数。
 	maxOTPAttempts = 5
+	// operationOTPTTL 是敏感操作验证码的有效期。
+	operationOTPTTL = 5 * time.Minute
+	// demoOTPCode 只在演示账号下使用；演示账号不发真实请求，固定码无安全影响。
+	demoOTPCode = "123456"
 	// maxCode 是验证码的取值上限（6 位数字）。
 	maxCode = 1000000
 	// 登录失败限流
@@ -183,6 +188,10 @@ func (s *Service) VerifyOTP(challenge, code, clientIP string) (string, string, e
 	if !exists {
 		return "", "", errors.New("验证已失效，请重新登录")
 	}
+	// 敏感操作挑战不能拿来换登录会话，否则等于绕过用户名密码。
+	if strings.HasPrefix(ch.Username, "op:") || strings.HasPrefix(ch.Username, "opd:") {
+		return "", "", errors.New("该验证码仅用于敏感操作确认")
+	}
 	if ch.Attempts >= maxOTPAttempts {
 		_ = s.store.DeleteChallenge(challenge)
 		return "", "", errors.New("验证码错误次数过多，请重新登录")
@@ -280,6 +289,97 @@ func (s *Service) Cleanup() error {
 		return err
 	}
 	return s.store.DeleteExpiredChallenges()
+}
+
+// RequestOperationOTP 为敏感写操作创建一次性验证码挑战。
+//
+// 挑战记录里用 "op:<operation>" 占位 username，业务层校验时会比对 operation，
+// 因此一个操作的验证码不能拿去执行另一个操作（防跨操作重放）。
+// demo 为 true 时使用固定演示码且不发 Telegram，用于零风险试用；
+// 真实账号必须已启用 Telegram，发送失败即作废挑战，绝不静默放行。
+func (s *Service) RequestOperationOTP(operation, summary string, demo bool) (string, error) {
+	operation = strings.TrimSpace(operation)
+	if operation == "" || len(operation) > 64 {
+		return "", errors.New("操作类型不合法")
+	}
+	if !demo && (s.notify == nil || !s.notify.Enabled()) {
+		return "", errors.New("请先在「设置 → Telegram」启用通知，敏感操作需要 Telegram 验证码二次确认")
+	}
+	if len(summary) > 300 {
+		summary = summary[:300]
+	}
+	summary = strings.ReplaceAll(summary, "\n", " ")
+
+	code := demoOTPCode
+	if !demo {
+		generated, err := randomCode()
+		if err != nil {
+			return "", err
+		}
+		code = generated
+	}
+	token, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	codeHash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	// 演示挑战与真实挑战用不同前缀，避免真实账号的写操作能拿固定演示码蒙混过关。
+	prefix := "op:"
+	if demo {
+		prefix = "opd:"
+	}
+	if err := s.store.CreateChallenge(token, prefix+operation, string(codeHash), operationOTPTTL); err != nil {
+		return "", err
+	}
+
+	if !demo {
+		msg := fmt.Sprintf(
+			"🔐 OCI 管理器敏感操作验证码\n\n操作：%s\n详情：%s\n验证码：%s\n有效期：%d 分钟\n\n如果不是本人操作，请立即修改面板密码。",
+			operation, summary, code, int(operationOTPTTL.Minutes()),
+		)
+		if err := s.notify.Send(msg); err != nil {
+			_ = s.store.DeleteChallenge(token)
+			return "", fmt.Errorf("发送操作验证码失败: %w", err)
+		}
+	}
+	return token, nil
+}
+
+// VerifyOperationOTP 校验并原子消费敏感操作验证码，不发放会话。
+func (s *Service) VerifyOperationOTP(challenge, code, operation string, demo bool) error {
+	ch, exists, err := s.store.GetChallenge(challenge)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("验证已失效，请重新发起操作")
+	}
+	expected := "op:" + operation
+	if demo {
+		expected = "opd:" + operation
+	}
+	if ch.Username != expected {
+		return errors.New("验证码与本次操作不匹配，请重新发起操作")
+	}
+	if ch.Attempts >= maxOTPAttempts {
+		_ = s.store.DeleteChallenge(challenge)
+		return errors.New("验证码错误次数过多，请重新发起操作")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(ch.CodeHash), []byte(code)); err != nil {
+		_ = s.store.BumpChallengeAttempts(challenge)
+		return errors.New("验证码不正确")
+	}
+	consumed, err := s.store.ConsumeChallenge(challenge)
+	if err != nil {
+		return err
+	}
+	if !consumed {
+		return errors.New("验证已失效，请重新发起操作")
+	}
+	return nil
 }
 
 // notifyLogin 推送登录提醒，失败只记日志，不影响登录流程。

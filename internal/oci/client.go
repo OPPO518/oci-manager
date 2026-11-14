@@ -32,13 +32,22 @@ type Credentials struct {
 }
 
 // ClientSet 是某个账号在某个区域下的一组服务客户端。
+//
+// Demo 不为 nil 时，这是一组「演示客户端」：所有 SDK 客户端都是 nil，
+// oci 包的每个导出函数都会先短路到内存模拟数据。这样即便漏改某个函数，
+// 也只会因 nil 指针报错，绝不会向 OCI 发出真实网络请求（fail-safe）。
 type ClientSet struct {
-	Region   string
-	Compute  *core.ComputeClient
-	Identity *identity.IdentityClient
-	Usage    *usageapi.UsageapiClient
-	Network  *core.VirtualNetworkClient
+	Region       string
+	Compute      *core.ComputeClient
+	Identity     *identity.IdentityClient
+	Usage        *usageapi.UsageapiClient
+	Network      *core.VirtualNetworkClient
+	BlockStorage *core.BlockstorageClient
+	Demo         *DemoState
 }
+
+// IsDemo 判断是否为演示客户端。
+func (cs *ClientSet) IsDemo() bool { return cs != nil && cs.Demo != nil }
 
 // newClientSet 构建一组客户端。proxyURL 为空表示直连。
 func newClientSet(creds Credentials, region, proxyURL string) (*ClientSet, error) {
@@ -87,12 +96,19 @@ func newClientSet(creds Credentials, region, proxyURL string) (*ClientSet, error
 	}
 	networkClient.HTTPClient = httpClient
 
+	blockClient, err := core.NewBlockstorageClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("创建块存储客户端失败: %w", err)
+	}
+	blockClient.HTTPClient = httpClient
+
 	return &ClientSet{
-		Region:   region,
-		Compute:  &compute,
-		Identity: &identityClient,
-		Usage:    &usageClient,
-		Network:  &networkClient,
+		Region:       region,
+		Compute:      &compute,
+		Identity:     &identityClient,
+		Usage:        &usageClient,
+		Network:      &networkClient,
+		BlockStorage: &blockClient,
 	}, nil
 }
 
@@ -149,6 +165,8 @@ type Pool struct {
 	mu    sync.Mutex
 	store *store.Store
 	cache map[string]*poolEntry
+	// demo 是全进程唯一的一份内存模拟状态，改名、换 IP 等操作会立刻反映在后续读取上。
+	demo *DemoState
 }
 
 type poolEntry struct {
@@ -158,7 +176,31 @@ type poolEntry struct {
 
 // NewPool 创建客户端池。
 func NewPool(st *store.Store) *Pool {
-	return &Pool{store: st, cache: make(map[string]*poolEntry)}
+	return &Pool{store: st, cache: make(map[string]*poolEntry), demo: newDemoState()}
+}
+
+// DemoClientSet 返回演示客户端（不持有任何 SDK 客户端）。
+func (p *Pool) DemoClientSet(region string) *ClientSet {
+	if region == "" {
+		region = "ap-tokyo-1"
+	}
+	return &ClientSet{Region: region, Demo: p.demo}
+}
+
+// IAMClientSet 用临时导入的高权限凭证构建只用于 IAM 的客户端。
+// 演示账号直接返回内存模拟客户端，不需要任何凭证。
+func (p *Pool) IAMClientSet(accountID string, creds Credentials, homeRegion string) (*ClientSet, error) {
+	account, err := p.store.GetAccount(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsDemo {
+		return p.DemoClientSet(homeRegion), nil
+	}
+	if homeRegion == "" {
+		return nil, fmt.Errorf("未配置 IAM home region，请在「设置 → IAM」中填写")
+	}
+	return newClientSet(creds, homeRegion, account.ProxyURL)
 }
 
 // For 返回指定账号在指定区域下的客户端。region 为空时使用账号的默认区域。
@@ -167,12 +209,15 @@ func (p *Pool) For(accountID, region string) (*ClientSet, error) {
 	if err != nil {
 		return nil, err
 	}
+	if region == "" {
+		region = account.Region
+	}
+	if account.IsDemo {
+		return p.DemoClientSet(region), nil
+	}
 	secret, err := p.store.AccountSecret(accountID)
 	if err != nil {
 		return nil, err
-	}
-	if region == "" {
-		region = account.Region
 	}
 
 	creds := Credentials{

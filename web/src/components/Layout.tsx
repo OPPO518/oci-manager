@@ -48,11 +48,19 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     items: [{ to: '/cost', label: '成本', icon: 'cost' }],
   },
   {
+    group: '网络',
+    items: [{ to: '/network', label: '网络', icon: 'network' }],
+  },
+  {
     group: '管理',
     items: [
       { to: '/accounts', label: '账号', icon: 'accounts' },
       { to: '/settings', label: '设置', icon: 'settings' },
     ],
+  },
+  {
+    group: '身份与权限',
+    items: [{ to: '/identity', label: '身份与权限', icon: 'shield' }],
   },
 ]
 
@@ -92,13 +100,23 @@ const PAGE_META: Record<string, { title: string; desc: string; group: string }> 
     desc: '配置 Telegram 通知、两步验证、HTTPS 证书与管理员密码。',
     group: '管理',
   },
+  '/network': {
+    title: '网络',
+    desc: '管理 VNIC、公网 IP 与安全列表：改名、更换公网 IP、可视化编辑规则。',
+    group: '网络',
+  },
+  '/identity': {
+    title: '身份与权限',
+    desc: '管理 IAM 用户、组、成员关系、API Key 与限额；所有写操作需二次验证。',
+    group: '身份与权限',
+  },
 }
 
 // 这些页面即使还没有账号也必须可用，否则无法完成初始配置
-const NO_ACCOUNT_REQUIRED = new Set(['/accounts', '/settings'])
+const NO_ACCOUNT_REQUIRED = new Set(['/accounts', '/settings', '/identity'])
 
 /* ------------------------------------------------------------------
-   全局服务菜单 tray：条目全部映射到现有 7 条路由，不造不存在的路由。
+   全局服务菜单 tray：条目全部映射到现有路由，不造不存在的路由。
    ------------------------------------------------------------------ */
 const ALL_SERVICES: NavItem[] = [
   { to: '/', label: '总览', icon: 'overview' },
@@ -108,6 +126,8 @@ const ALL_SERVICES: NavItem[] = [
   { to: '/cost', label: '成本与用量', icon: 'cost' },
   { to: '/accounts', label: '账号', icon: 'accounts' },
   { to: '/settings', label: '设置', icon: 'settings' },
+  { to: '/network', label: '网络', icon: 'network' },
+  { to: '/identity', label: '身份与权限', icon: 'shield' },
 ]
 
 const PINNED: NavItem[] = [ALL_SERVICES[0], ALL_SERVICES[1]]
@@ -116,9 +136,13 @@ const RECENT: NavItem[] = [ALL_SERVICES[4], ALL_SERVICES[5], ALL_SERVICES[3]]
 const TRAY_GROUPS: { group: string; icon: IconName; items: NavItem[] }[] = [
   { group: 'Compute', icon: 'compute', items: [ALL_SERVICES[1], ALL_SERVICES[2], ALL_SERVICES[3]] },
   { group: 'Storage', icon: 'storage', items: [] },
-  { group: 'Networking', icon: 'network', items: [] },
+  { group: 'Networking', icon: 'network', items: [ALL_SERVICES[7]] },
   { group: 'Database', icon: 'database', items: [] },
-  { group: 'Identity & Security', icon: 'shield', items: [ALL_SERVICES[5], ALL_SERVICES[6]] },
+  {
+    group: 'Identity & Security',
+    icon: 'shield',
+    items: [ALL_SERVICES[5], ALL_SERVICES[6], ALL_SERVICES[8]],
+  },
   { group: 'Observability & Management', icon: 'eye', items: [ALL_SERVICES[4]] },
 ]
 
@@ -253,6 +277,7 @@ export function Layout({ children }: { children: ReactNode }) {
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
+                  {a.is_demo ? '（演示）' : ''}
                   {a.proxy_url ? '（代理）' : ''}
                 </option>
               ))}
@@ -460,6 +485,13 @@ export function Layout({ children }: { children: ReactNode }) {
               </div>
               {action && <div className="oci-page-actions">{action}</div>}
             </div>
+
+            {/* 选中演示账号时的全局提示：独立一行，不遮挡任何页面内容 */}
+            {account?.is_demo && (
+              <Notice tone="info" className="mb-4">
+                当前为演示账号，所有数据均为模拟，不会发出任何真实 OCI 请求，可放心试用全部功能。
+              </Notice>
+            )}
 
             {needAccount ? (
               <Notice tone="info">

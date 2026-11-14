@@ -25,6 +25,9 @@ type Compartment struct {
 
 // ListRegions 列出账号已订阅的全部区域。
 func ListRegions(ctx context.Context, cs *ClientSet, tenancyID string) ([]Region, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listRegions(), nil
+	}
 	resp, err := cs.Identity.ListRegionSubscriptions(ctx, identity.ListRegionSubscriptionsRequest{
 		TenancyId: &tenancyID,
 	})
@@ -52,6 +55,9 @@ func ListRegions(ctx context.Context, cs *ClientSet, tenancyID string) ([]Region
 
 // ListAvailabilityDomains 列出指定区间下的可用域名称。
 func ListAvailabilityDomains(ctx context.Context, cs *ClientSet, compartmentID string) ([]string, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listAvailabilityDomains(), nil
+	}
 	resp, err := cs.Identity.ListAvailabilityDomains(ctx, identity.ListAvailabilityDomainsRequest{
 		CompartmentId: &compartmentID,
 	})
@@ -69,6 +75,9 @@ func ListAvailabilityDomains(ctx context.Context, cs *ClientSet, compartmentID s
 
 // ListCompartments 列出根区间及其全部子区间。
 func ListCompartments(ctx context.Context, cs *ClientSet, tenancyID string) ([]Compartment, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listCompartments(), nil
+	}
 	inSubtree := true
 	accessLevel := identity.ListCompartmentsAccessLevelAccessible
 
@@ -110,6 +119,9 @@ func ListCompartments(ctx context.Context, cs *ClientSet, tenancyID string) ([]C
 
 // GetTenancyName 查询租户外显名称，用于连通性测试时确认凭证有效。
 func GetTenancyName(ctx context.Context, cs *ClientSet, tenancyID string) (string, error) {
+	if cs.IsDemo() {
+		return cs.Demo.tenancyName(), nil
+	}
 	resp, err := cs.Identity.GetTenancy(ctx, identity.GetTenancyRequest{TenancyId: &tenancyID})
 	if err != nil {
 		return "", wrap("查询租户信息失败", err)

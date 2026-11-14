@@ -18,14 +18,17 @@ type Subnet struct {
 
 // Image 描述一个可用的镜像。
 type Image struct {
-	ID                      string `json:"id"`
-	DisplayName             string `json:"display_name"`
-	OperatingSystem         string `json:"operating_system"`
-	OperatingSystemVersion  string `json:"operating_system_version"`
+	ID                     string `json:"id"`
+	DisplayName            string `json:"display_name"`
+	OperatingSystem        string `json:"operating_system"`
+	OperatingSystemVersion string `json:"operating_system_version"`
 }
 
 // ListSubnets 列出区间下的全部子网。
 func ListSubnets(ctx context.Context, cs *ClientSet, compartmentID string) ([]Subnet, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listSubnets(), nil
+	}
 	resp, err := cs.Network.ListSubnets(ctx, core.ListSubnetsRequest{CompartmentId: &compartmentID})
 	if err != nil {
 		return nil, wrap("列出子网失败", err)
@@ -55,6 +58,9 @@ func ListSubnets(ctx context.Context, cs *ClientSet, compartmentID string) ([]Su
 
 // ListImages 列出区间下可用的镜像，按操作系统排序交给前端筛选。
 func ListImages(ctx context.Context, cs *ClientSet, compartmentID string) ([]Image, error) {
+	if cs.IsDemo() {
+		return cs.Demo.listImages(), nil
+	}
 	resp, err := cs.Compute.ListImages(ctx, core.ListImagesRequest{CompartmentId: &compartmentID})
 	if err != nil {
 		return nil, wrap("列出镜像失败", err)
