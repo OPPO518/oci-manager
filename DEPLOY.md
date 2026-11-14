@@ -16,7 +16,9 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
 - 默认 HTTP 端口 `8080`，HTTPS 端口 `443`（映射到容器 `8443`）。
 - **重复执行同一条命令即为升级**：只拉新镜像并重启，不会覆盖 `.env`、数据库和证书。
 - 可用环境变量覆盖：`OCI_MANAGER_REPO` / `OCI_MANAGER_IMAGE` / `OCI_MANAGER_DIR` /
-  `OCI_MANAGER_PORT` / `OCI_MANAGER_HTTPS_PORT`。
+  `OCI_MANAGER_PORT` / `OCI_MANAGER_HTTPS_PORT`。端口设置会写进 `.env`，
+  以后直接重跑一键命令升级也不会被改回默认。
+- 脚本启动前会检查 8080 / 443 是否被占用，冲突时打印占用进程和解决办法。
 
 脚本成功的前提：GitHub Actions 已跑过一次并产出 `ghcr.io/oppo518/oci-manager:latest`。
 首次推送代码后到仓库的 **Actions** 页确认构建成功（约 5–10 分钟，多架构）。
@@ -39,6 +41,39 @@ sudo OCI_MANAGER_DIR=/root/oci-manager bash /tmp/oci-install.sh
 脚本会检测到已有数据库并打印「将完整保留账号、任务与证书」，同时沿用仓库里的
 `docker-compose.yml`，不会覆盖造成 `git pull` 冲突。
 `OCI_MANAGER_DIR` 请换成你实际的克隆目录（用 `pwd` 查看）。
+
+### 443 端口被占用（`address already in use`）
+
+VPS 上如果已经跑了 nginx、宝塔面板或之前手动部署的旧容器，一键脚本会在最后一步报：
+
+```
+failed to bind host port 0.0.0.0:443/tcp: address already in use
+```
+
+先确认是谁占着端口（镜像和密钥此时已经下载/生成好了，不用重来）：
+
+```bash
+sudo ss -tlnp | grep -E ':(443|8080)\b'
+docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+```
+
+按实际情况三选一：
+
+1. **停用占用者**：`sudo docker stop <容器名>` 或 `sudo systemctl stop nginx`，
+   然后重新执行一键命令即可。
+2. **保留该服务，把管理器换到 8443**（Cloudflare 代理支持 8443，DNS-01 申请证书不受影响）：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh \
+     -o /tmp/oci-install.sh
+   sudo OCI_MANAGER_HTTPS_PORT=8443 bash /tmp/oci-install.sh
+   ```
+
+   此时浏览器需访问 `https://域名:8443`；若域名走 Cloudflare 代理，访客仍可用
+   `https://域名`（CF 会回源 8443）。记得放行安全组的 8443。
+   端口会写入 `.env`，之后直接重跑一键命令升级会一直沿用。
+3. **之前手动 clone 部署过、想保留已录入的账号**：用上一节的 `OCI_MANAGER_DIR`
+   指向原目录，不要直接用 `/opt/oci-manager` 里的新空库。
 
 > 一键脚本已经包含登录鉴权、HTTPS 端口映射和目录权限修复。下面的章节是
 > 手动部署 / 从源码构建的可选路径，以及排障参考。
@@ -287,6 +322,7 @@ sudo ufw enable
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
+| 一键脚本报 `failed to bind host port 0.0.0.0:443/tcp: address already in use` | 443 被 nginx / 宝塔 / 旧容器占用。见「零、一键部署 → 443 端口被占用」：停用占用者，或改用 `sudo OCI_MANAGER_HTTPS_PORT=8443 bash /tmp/oci-install.sh` |
 | 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:101 data` 后 `docker compose up -d`（一键脚本已自动处理） |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
 | 一键脚本报「拉取失败」 | Actions 还没产出镜像，或仓库为私有。到 Actions 页确认构建成功；私有仓库先 `docker login ghcr.io` |
