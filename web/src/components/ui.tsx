@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AnchoredMenu } from './AnchoredMenu'
 
 /* ------------------------------------------------------------------
    共用内联 SVG 图标（无第三方图标依赖）
@@ -332,9 +333,35 @@ const STATE_TONE: Record<string, BadgeTone> = {
   TERMINATING: 'danger',
 }
 
+/** OCI 返回的状态值统一显示为中文；已是中文的自定义文案原样保留 */
+const STATE_LABEL: Record<string, string> = {
+  RUNNING: '正在运行',
+  AVAILABLE: '可用',
+  STOPPED: '已停止',
+  STOPPING: '正在停止',
+  STARTING: '正在启动',
+  PROVISIONING: '正在预配',
+  TERMINATED: '已终止',
+  TERMINATING: '正在终止',
+  CREATING: '正在创建',
+  ACTIVE: '有效',
+  INACTIVE: '无效',
+  ATTACHED: '已附加',
+  DETACHED: '未附加',
+  ASSIGNED: '已分配',
+  UNASSIGNED: '未分配',
+  ENABLED: '已启用',
+  DISABLED: '已禁用',
+  OK: '正常',
+  ERROR: '异常',
+  UNKNOWN: '未知',
+}
+
 export function Badge({ children, tone }: { children: ReactNode; tone?: BadgeTone }) {
-  const resolved = tone ?? STATE_TONE[typeof children === 'string' ? children : ''] ?? 'neutral'
-  return <span className={`oci-badge oci-badge--${resolved}`}>{children}</span>
+  const key = typeof children === 'string' ? children : ''
+  const resolved = tone ?? STATE_TONE[key] ?? 'neutral'
+  const label = key && STATE_LABEL[key] ? STATE_LABEL[key] : children
+  return <span className={`oci-badge oci-badge--${resolved}`}>{label}</span>
 }
 
 const TASK_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
@@ -392,26 +419,69 @@ export function Card({
   )
 }
 
-/** 部件右上角 "⋯"（展示性，不假装提供未实现的操作） */
-export function CardDots() {
+export type CardAction = {
+  label: ReactNode
+  onSelect: () => void
+  disabled?: boolean
+  danger?: boolean
+  separatorBefore?: boolean
+}
+
+/**
+ * 部件右上角 "⋯"：只接受真实可执行的操作。
+ * 未传入 items 时渲染禁用态，不再显示「界面演示」这类点了没用的假菜单。
+ */
+export function CardDots({ items = [], label = '部件选项' }: { items?: CardAction[]; label?: string }) {
   const [open, setOpen] = useState(false)
-  return (
-    <div className="oci-actions">
+  const ref = useRef<HTMLButtonElement>(null)
+
+  if (items.length === 0) {
+    return (
       <button
         type="button"
         className="oci-btn-icon oci-widget-dots"
-        aria-label="部件选项"
-        title="部件选项"
+        disabled
+        title="暂无可用操作"
+        aria-label="暂无可用操作"
+      >
+        <Icon name="more" />
+      </button>
+    )
+  }
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="oci-btn-icon oci-widget-dots"
+        aria-label={label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="more" />
       </button>
-      {open && (
-        <div className="oci-actions-menu" onMouseLeave={() => setOpen(false)}>
-          <span className="oci-actions-note">部件选项（界面演示）</span>
-        </div>
-      )}
-    </div>
+      <AnchoredMenu open={open} anchorRef={ref} onClose={() => setOpen(false)}>
+        {items.map((it, i) => (
+          <div key={i}>
+            {it.separatorBefore && <div className="oci-actions-sep" />}
+            <button
+              type="button"
+              className={`oci-actions-item ${it.danger ? 'is-danger' : ''}`}
+              disabled={it.disabled}
+              onClick={() => {
+                setOpen(false)
+                it.onSelect()
+              }}
+            >
+              {it.label}
+            </button>
+          </div>
+        ))}
+      </AnchoredMenu>
+    </>
   )
 }
 
@@ -427,7 +497,7 @@ export function Loading({ text = '加载中…' }: { text?: string }) {
   )
 }
 
-export function EmptyState({ text = 'No items found.', action }: { text?: string; action?: ReactNode }) {
+export function EmptyState({ text = '未找到任何项目。', action }: { text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
       <p className="text-sm text-oracle-muted">{text}</p>
@@ -635,7 +705,7 @@ export function Switch({
 }
 
 /* ------------------------------------------------------------------
-   分页：Showing 1–N of M + 每页条数 + 上/下页
+   分页：对齐 Oracle 控制台「第 1 页/共 1 页 (第 1 - 2 项/共 2 项)」+ 每页的项数
    ------------------------------------------------------------------ */
 export function Pager({
   total,
@@ -655,25 +725,7 @@ export function Pager({
   const to = Math.min(page * pageSize, total)
   return (
     <div className="oci-pager">
-      <span className="oci-pager-info">
-        Showing {from}–{to} of {total}
-      </span>
       <div className="oci-pager-controls">
-        <label>
-          每页
-          <select
-            className="oci-select oci-pager-size"
-            value={pageSize}
-            onChange={(e) => onPageSize(Number(e.target.value))}
-          >
-            {[10, 20, 50, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          条
-        </label>
         <button
           type="button"
           className="oci-btn-icon"
@@ -684,9 +736,6 @@ export function Pager({
         >
           <Icon name="chevron-left" />
         </button>
-        <span className="oci-pager-page">
-          {page} / {pages}
-        </span>
         <button
           type="button"
           className="oci-btn-icon"
@@ -697,13 +746,31 @@ export function Pager({
         >
           <Icon name="chevron-right" />
         </button>
+        <span className="oci-pager-info">
+          第 {page} 页/共 {pages} 页 (第 {from} - {to} 项/共 {total} 项)
+        </span>
       </div>
+      <label className="oci-pager-size-label">
+        每页的项数
+        <select
+          className="oci-select oci-pager-size"
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value))}
+          aria-label="每页的项数"
+        >
+          {[10, 25, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   )
 }
 
 /** 返回当前页数据与可直接渲染的 <Pager/>，页面无需自行管理分页状态 */
-export function usePager<T>(items: T[], defaultPageSize = 10) {
+export function usePager<T>(items: T[], defaultPageSize = 25) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(defaultPageSize)
   const pages = Math.max(1, Math.ceil(items.length / pageSize))
@@ -737,49 +804,41 @@ export type ActionItem = {
 
 export function ActionsMenu({ items, label = '操作' }: { items: ActionItem[]; label?: string }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  const ref = useRef<HTMLButtonElement>(null)
 
   return (
-    <div className="oci-actions" ref={ref}>
+    <span className="oci-actions">
       <button
+        ref={ref}
         type="button"
         className="oci-btn-icon"
         aria-label={label}
         title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="more" />
       </button>
-      {open && (
-        <div className="oci-actions-menu">
-          {items.map((it, i) => (
-            <div key={i}>
-              {it.separatorBefore && <div className="oci-actions-sep" />}
-              <button
-                type="button"
-                className={`oci-actions-item ${it.danger ? 'is-danger' : ''}`}
-                disabled={it.disabled}
-                onClick={() => {
-                  setOpen(false)
-                  it.onSelect()
-                }}
-              >
-                {it.label}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+      <AnchoredMenu open={open} anchorRef={ref} onClose={() => setOpen(false)}>
+        {items.map((it, i) => (
+          <div key={i}>
+            {it.separatorBefore && <div className="oci-actions-sep" />}
+            <button
+              type="button"
+              className={`oci-actions-item ${it.danger ? 'is-danger' : ''}`}
+              disabled={it.disabled}
+              onClick={() => {
+                setOpen(false)
+                it.onSelect()
+              }}
+            >
+              {it.label}
+            </button>
+          </div>
+        ))}
+      </AnchoredMenu>
+    </span>
   )
 }
 

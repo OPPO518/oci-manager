@@ -96,6 +96,17 @@ export default function Grabber() {
       })
   }, [])
 
+  // 从实例页「创建实例」按钮跳转过来时，自动打开新建抢购任务表单
+  const openCreate = (location.state as { openCreate?: boolean } | null)?.openCreate
+  const openedFromInstances = useRef(false)
+  useEffect(() => {
+    if (!openCreate || !account || openedFromInstances.current) return
+    openedFromInstances.current = true
+    openForm()
+    // openForm 每次渲染会重建，用 ref 保证只触发一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, openCreate])
+
   // 从「容量探测」页携带配置跳转过来时，自动打开新建任务表单并预填
   useEffect(() => {
     if (!fromCapacity || !account || openedFromCapacity.current) return

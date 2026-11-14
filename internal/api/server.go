@@ -65,7 +65,7 @@ func New(
 	s.engine = gin.New()
 	// 不信任任何 X-Forwarded-For：否则攻击者可伪造来源 IP，绕过登录锁定与限流。
 	_ = s.engine.SetTrustedProxies(nil)
-	s.engine.Use(gin.Logger(), gin.Recovery(), s.securityHeaders())
+	s.engine.Use(gin.Logger(), gin.Recovery(), s.securityHeaders(), s.rejectPlainHTTP())
 	s.limiter = newIPRateLimiter()
 	s.registerRoutes()
 	return s, nil

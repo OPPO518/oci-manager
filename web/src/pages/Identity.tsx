@@ -341,7 +341,9 @@ export default function Identity() {
 
   const protectedIds = overview?.protected_user_ids ?? []
   const domainsMode = settings?.mode === 'domains' || overview?.mode === 'domains'
-  const writeDisabled = !account || !overview || overview.read_only || domainsMode
+  // 模块开关关闭、无概览数据、只读或 Identity Domains 模式下，一律禁用写操作
+  const writeDisabled =
+    !account || !settings?.enabled || !overview || overview.read_only || domainsMode
 
   const userName = (id: string) =>
     overview?.users.find((u) => u.id === id)?.name ?? truncate(id, 16, 0)
@@ -559,7 +561,7 @@ export default function Identity() {
   }
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: 'overview', label: 'IAM 概览' },
+    { id: 'overview', label: 'IAM 资源' },
     { id: 'settings', label: 'IAM 设置' },
   ]
 
@@ -568,63 +570,71 @@ export default function Identity() {
       {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {success && <SuccessBanner message={success} onClose={() => setSuccess('')} />}
 
-      {/* 顶部状态条 */}
-      <Card title="模块状态" bodyClassName="oci-card-body--compact">
-        <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
-          <div>
-            <dt className="text-xs text-oracle-muted">模块状态</dt>
-            <dd className="mt-1">
-              <Badge tone={settings?.enabled ? 'success' : 'neutral'}>
-                {settings?.enabled ? '已启用' : '未启用'}
-              </Badge>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-oracle-muted">临时凭证</dt>
-            <dd className="mt-1">
-              <Badge tone={settings?.has_credential ? 'success' : 'warning'}>
-                {settings?.has_credential ? '已导入' : '未导入'}
-              </Badge>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-oracle-muted">凭证到期时间</dt>
-            <dd className="mt-1 text-xs">{formatDateTime(settings?.credential_expires_at)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-oracle-muted">Home Region</dt>
-            <dd className="mt-1 text-xs">{settings?.home_region || '—'}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-oracle-muted">Telegram</dt>
-            <dd className="mt-1">
-              <Badge tone={settings?.telegram_ready ? 'success' : 'warning'}>
-                {settings?.telegram_ready ? '已就绪' : '未就绪'}
-              </Badge>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-oracle-muted">模式 / 数据</dt>
-            <dd className="mt-1 text-xs">
-              {settings?.mode ?? '—'} · {settings?.demo ? '演示' : '真实'}
-            </dd>
-          </div>
-        </dl>
+      {/* 我的概要信息：官网详情页标题 + 双栏键值明细 */}
+      <div className="oci-detail-head">
+        <div>
+          <div className="oci-detail-title">{account?.name ?? '未选择账号'}</div>
+          <div className="oci-detail-sub">我的概要信息 · 身份与安全</div>
+        </div>
+        <Badge tone={settings?.enabled ? 'success' : 'neutral'}>
+          {settings?.enabled ? '模块已启用' : '模块未启用'}
+        </Badge>
+      </div>
+      <Card title="详细信息" bodyClassName="oci-card-body--compact">
+        <div className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+          {[
+            {
+              label: '模块状态',
+              value: (
+                <Badge tone={settings?.enabled ? 'success' : 'neutral'}>
+                  {settings?.enabled ? '已启用' : '未启用'}
+                </Badge>
+              ),
+            },
+            {
+              label: '临时凭证',
+              value: (
+                <Badge tone={settings?.has_credential ? 'success' : 'warning'}>
+                  {settings?.has_credential ? '已导入' : '未导入'}
+                </Badge>
+              ),
+            },
+            { label: '凭证到期时间', value: formatDateTime(settings?.credential_expires_at) },
+            { label: '主区域（Home Region）', value: settings?.home_region || '—' },
+            {
+              label: 'Telegram 验证码',
+              value: (
+                <Badge tone={settings?.telegram_ready ? 'success' : 'warning'}>
+                  {settings?.telegram_ready ? '已就绪' : '未就绪'}
+                </Badge>
+              ),
+            },
+            {
+              label: '模式 / 数据',
+              value: `${settings?.mode === 'domains' ? 'Identity Domains' : '经典 IAM'} · ${settings?.demo ? '演示' : '真实'}`,
+            },
+          ].map((row) => (
+            <div className="oci-kv-row" key={row.label}>
+              <div className="oci-kv-label">{row.label}</div>
+              <div className="oci-kv-value">{row.value}</div>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {domainsMode && (
         <Notice tone="warning">
-          当前为 <strong>Identity Domains（domains）</strong> 模式，本面板仅支持 classic 模式的 IAM 管理，
-          相关写操作不可用，请在 IAM 设置中切换回 classic 模式。
+          当前为 <strong>Identity Domains（domains）</strong> 模式，本面板仅支持经典 IAM 模式的管理，
+          相关写操作不可用。请在本页「IAM 设置」页签中切换回经典 IAM 模式。
         </Notice>
       )}
 
-      <div className="oci-tabs">
+      <div className="oci-page-tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
-            className={`oci-tab ${tab === t.id ? 'active' : ''}`}
+            className={`oci-page-tab ${tab === t.id ? 'active' : ''}`}
             onClick={() => setTab(t.id)}
           >
             {t.label}
@@ -646,7 +656,7 @@ export default function Identity() {
               )}
               {!account && (
                 <Notice tone="info">
-                  尚未选择 OCI 账号。可先在「账号」页添加账号，或直接到「IAM 设置」完成模块配置。
+                  尚未选择 OCI 账号。可先在「账号」页添加账号，或切换到本页的「IAM 设置」页签完成模块配置。
                 </Notice>
               )}
               {!overview && account && (
@@ -966,8 +976,8 @@ export default function Identity() {
                     label="启用 IAM 管理模块"
                   />
                   <Notice tone="info">
-                    本面板仅支持 <strong>classic</strong> 模式；Identity Domains（domains）模式下的写操作不可用。
-                    真实账号的写操作需在设置里启用 Telegram 以接收验证码。
+                    本面板仅支持<strong>经典 IAM（classic）</strong>模式；Identity Domains 模式下的写操作不可用。
+                    模块开关、模式与主区域都在本页的「IAM 设置」页签；真实账号的写操作还需在「设置 → Telegram 通知」启用验证码。
                   </Notice>
                   <div className="grid grid-cols-1 gap-3 border-t border-oracle-border pt-4 sm:grid-cols-2">
                     <Field label="模式（mode）">
@@ -976,11 +986,11 @@ export default function Identity() {
                         value={moduleMode}
                         onChange={(e) => setModuleMode(e.target.value)}
                       >
-                        <option value="classic">classic</option>
-                        <option value="domains">domains</option>
+                        <option value="classic">经典 IAM（classic）</option>
+                        <option value="domains">Identity Domains（domains）</option>
                       </select>
                     </Field>
-                    <Field label="Home Region">
+                    <Field label="主区域（Home Region）">
                       <input
                         className="oci-input"
                         value={homeRegion}

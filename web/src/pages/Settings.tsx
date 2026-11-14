@@ -16,7 +16,15 @@ import { useAuth } from '../lib/auth'
 import { formatDateTime, truncate } from '../lib/format'
 import type { AuditLog, IpRotationSettings, TelegramSettings, TLSSettings } from '../lib/types'
 
-type Tab = 'telegram' | 'grabber' | 'tls' | 'password' | 'demo' | 'ipRotation' | 'audit'
+type Tab =
+  | 'telegram'
+  | 'grabber'
+  | 'tls'
+  | 'password'
+  | 'security'
+  | 'demo'
+  | 'ipRotation'
+  | 'audit'
 
 const EMPTY_TG: TelegramSettings = {
   enabled: false,
@@ -38,9 +46,74 @@ const EMPTY_TLS: TLSSettings = {
   https_port: ':8443',
 }
 
+/* 审计日志后端存的是机器枚举，展示层统一翻译成中文 */
+const CATEGORY_LABEL: Record<string, string> = {
+  settings: '设置',
+  iam: '身份与权限',
+  compute: '计算',
+  storage: '存储',
+  network: '网络',
+  auth: '登录',
+  account: '账号',
+  task: '抢购',
+}
+
+const OPERATION_LABEL: Record<string, string> = {
+  demo_mode: '切换演示模式',
+  ip_rotation_policy: '更新换 IP 保护策略',
+  iam_settings: '更新 IAM 设置',
+  iam_credential_import: '导入临时凭证',
+  iam_credential_clear: '清除临时凭证',
+  guard_block: '安全护栏拦截',
+  iam_create_user: '创建 IAM 用户',
+  iam_update_user: '更新 IAM 用户',
+  iam_delete_user: '删除 IAM 用户',
+  iam_reset_password: '重置控制台密码',
+  iam_create_api_key: '上传 API Key',
+  iam_delete_api_key: '删除 API Key',
+  iam_add_member: '加入用户组',
+  iam_remove_member: '移出用户组',
+  rename_instance: '重命名实例',
+  update_boot_volume: '更新引导卷',
+  update_vnic: '更新 VNIC',
+  update_security_list: '更新安全列表',
+  rotate_public_ip: '更换公网 IP',
+}
+
+function humanOperation(op: string) {
+  return OPERATION_LABEL[op] ?? op.replace(/_/g, ' ')
+}
+
+const RESULT_META: Record<string, { label: string; tone: 'success' | 'danger' | 'warning' | 'neutral' }> = {
+  ok: { label: '成功', tone: 'success' },
+  updated: { label: '已更新', tone: 'success' },
+  true: { label: '已启用', tone: 'success' },
+  false: { label: '已关闭', tone: 'neutral' },
+  blocked: { label: '已拦截', tone: 'warning' },
+  denied: { label: '已拒绝', tone: 'danger' },
+  failed: { label: '失败', tone: 'danger' },
+  error: { label: '错误', tone: 'danger' },
+}
+
+function humanResult(raw: string) {
+  const key = raw.trim().toLowerCase()
+  return (
+    RESULT_META[key] ?? {
+      label: raw || '—',
+      tone: /fail|deny|error|block/i.test(key)
+        ? ('danger' as const)
+        : ('success' as const),
+    }
+  )
+}
+
 export default function Settings() {
   const { username } = useAuth()
   const [tab, setTab] = useState<Tab>('telegram')
+  const [access] = useState(() => ({
+    host: window.location.hostname,
+    secure: window.location.protocol === 'https:',
+  }))
 
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -196,7 +269,7 @@ export default function Settings() {
     try {
       const saved = await api.tls.disable()
       setTls(saved)
-      setNotice('已关闭 HTTPS，HTTP 访问始终保留')
+      setNotice('已关闭 HTTPS。若当前只映射了 443，请重跑安装脚本恢复 HTTP 端口映射。')
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -276,10 +349,21 @@ export default function Settings() {
     { id: 'grabber', label: '抢购策略' },
     { id: 'tls', label: 'HTTPS 证书' },
     { id: 'password', label: '修改密码' },
+    { id: 'security', label: '登录与安全' },
     { id: 'demo', label: '演示模式' },
     { id: 'ipRotation', label: '换 IP 保护' },
     { id: 'audit', label: '审计日志' },
   ]
+
+  // Passkey 服务端硬门禁的展示侧：WebAuthn 要求安全上下文 + 域名 RP ID
+  const isIpHost =
+    /^[\d.]+$/.test(access.host) || access.host === '::1' || access.host.includes(':')
+  const passkeyReason = !access.secure
+    ? '当前为明文 HTTP 访问，需先启用 HTTPS'
+    : isIpHost
+      ? '当前通过 IP 访问（WebAuthn 的 RP ID 必须是域名）'
+      : ''
+  const passkeyReady = !passkeyReason && tls.cert_issued
 
   return (
     <div className="space-y-4">
@@ -505,7 +589,8 @@ export default function Settings() {
               <button
                 type="button"
                 className="oci-btn-danger"
-                disabled={disablingTLS || !tls.enabled}
+                disabled={disablingTLS || !tls.cert_issued}
+                title={tls.cert_issued ? '关闭 HTTPS' : '尚未签发证书，无需关闭'}
                 onClick={() => void disableTLS()}
               >
                 {disablingTLS ? '处理中…' : '关闭 HTTPS'}
@@ -534,10 +619,93 @@ export default function Settings() {
             )}
 
             <p className="text-xs leading-relaxed text-oracle-muted">
-              启用后访问 <code className="font-mono">https://{tlsDomain || '你的域名'}</code>。
-              <strong>HTTP 端口始终保留</strong>，即使证书配置失败也能回到本页修改。
-              请放行云厂商安全组的 443 端口。
+              证书签发成功后访问 <code className="font-mono">https://{tlsDomain || '你的域名'}</code>。
+              首次部署只映射 HTTP 端口，未开放 443；签发证书后<strong>重跑一次安装脚本</strong>，
+              脚本会改为只映射 HTTPS 并关闭宿主机 HTTP 端口（容器内健康检查端口不受影响）。
+              请放行云厂商安全组的 443 端口。纯 IP 证书不受支持，Passkey 也只在域名 + HTTPS 下可用。
             </p>
+          </div>
+        </Card>
+      )}
+
+      {/* ---------------- 登录与安全 ---------------- */}
+      {tab === 'security' && (
+        <Card title="登录与安全">
+          <div className="max-w-3xl">
+            <p className="oci-inline-hint mb-4">
+              下列是当前面板真实启用的登录保护方式。新增 TOTP 或通行密钥后会自动出现在这里；
+              未配置的方式不会伪装成可点控件。
+            </p>
+            <div className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">管理员账号</div>
+                <div className="oci-kv-value">{username || '—'}</div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">密码</div>
+                <div className="oci-kv-value">
+                  <Badge tone="success">已设置</Badge>
+                </div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">Telegram 登录验证码</div>
+                <div className="oci-kv-value">
+                  <Badge tone={tg.login_otp ? 'success' : 'neutral'}>
+                    {tg.login_otp ? '已启用' : '未启用'}
+                  </Badge>
+                </div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">Telegram 通知</div>
+                <div className="oci-kv-value">
+                  <Badge tone={tg.enabled && tg.has_token && tg.chat_id ? 'success' : 'warning'}>
+                    {tg.enabled && tg.has_token && tg.chat_id ? '已就绪' : '未配置完成'}
+                  </Badge>
+                </div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">HTTPS 证书</div>
+                <div className="oci-kv-value">
+                  <Badge tone={tls.cert_issued ? 'success' : 'warning'}>
+                    {tls.cert_issued ? `已生效 · ${tls.domain || '—'}` : '未启用'}
+                  </Badge>
+                </div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">当前访问</div>
+                <div className="oci-kv-value">
+                  {access.secure ? 'HTTPS' : 'HTTP（明文）'} · {access.host}
+                </div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">两步验证覆盖范围</div>
+                <div className="oci-kv-value">登录、IAM 与敏感资源操作</div>
+              </div>
+              <div className="oci-kv-row">
+                <div className="oci-kv-label">备份码 / TOTP</div>
+                <div className="oci-kv-value">尚未配置</div>
+              </div>
+            </div>
+
+            <div className="mt-5 border-t border-oracle-border pt-3">
+              <div className="oci-kv-title">通行密钥（Passkey）</div>
+              <Notice tone={passkeyReady ? 'info' : 'warning'}>
+                {passkeyReady ? (
+                  <>
+                    当前满足「域名 + HTTPS」条件。通行密钥的注册与登录将在下一批改动中提供，
+                    届时需要你在真实浏览器上完成一次注册与登录验证；密码登录会保留作为恢复通道。
+                  </>
+                ) : (
+                  <>
+                    不可用：{passkeyReason || '证书尚未签发'}。WebAuthn 只在 HTTPS 安全上下文可用，
+                    且 RP ID 必须绑定域名，纯 IP 证书无法使用。TOTP 与 Telegram 验证码不受此限制。
+                  </>
+                )}
+              </Notice>
+              <p className="oci-inline-hint mt-3">
+                纯 IP 证书方案已按你的决定完全放弃；证书只支持 Cloudflare DNS-01 域名证书。
+              </p>
+            </div>
           </div>
         </Card>
       )}
@@ -717,18 +885,16 @@ export default function Settings() {
                   {auditLogs.slice(0, 50).map((log) => (
                     <tr key={log.id}>
                       <td className="text-xs text-oracle-muted">{formatDateTime(log.created_at)}</td>
-                      <td className="text-xs">{log.category}</td>
-                      <td className="font-mono text-xs">{log.operation}</td>
+                      <td className="text-xs">{CATEGORY_LABEL[log.category] ?? log.category}</td>
+                      <td className="text-xs" title={log.operation}>
+                        {humanOperation(log.operation)}
+                      </td>
                       <td className="font-mono text-xs" title={log.target}>
                         {truncate(log.target, 18, 0)}
                       </td>
                       <td>
-                        <Badge
-                          tone={
-                            /fail|deny|error/i.test(log.result) ? 'danger' : 'success'
-                          }
-                        >
-                          {log.result}
+                        <Badge tone={humanResult(log.result).tone}>
+                          {humanResult(log.result).label}
                         </Badge>
                       </td>
                       <td className="text-xs">{log.detail || '—'}</td>

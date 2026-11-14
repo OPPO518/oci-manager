@@ -22,12 +22,17 @@ type Config struct {
 	EncryptionKey []byte
 	// WebDir 是前端静态资源目录。为空时使用内嵌资源。
 	WebDir string
-	// AllowInsecureHTTP 为 true 时，即使证书已签发也不把 HTTP 跳转到 HTTPS。
+	// DisablePlainHTTP 为 true 时，明文 HTTP 的业务请求一律 403（仅 /api/health 放行）。
+	// 由 install.sh 在「HTTPS 模式」下注入：只有脚本确实把宿主机端口切成只映射 443
+	// 之后才禁用 HTTP，避免证书刚签发、443 尚未映射时把用户锁在门外。
+	DisablePlainHTTP bool
+	// AllowInsecureHTTP 为 true 时，即使处于 HTTPS 模式也放行明文 HTTP。
 	// 仅用于排障或反代已终结 TLS 的场景；开启后登录密码、OTP 与 OCI 私钥
 	// 会重新暴露在明文 HTTP 下。
 	AllowInsecureHTTP bool
-	// PublicHTTPSPort 是浏览器访问 HTTPS 的端口，用于构造跳转地址。
-	// 默认 443；若 compose 把容器 8443 映射到宿主机其他端口需同步设置。
+	// PublicHTTPSPort 保留兼容旧配置：曾用于构造 HTTP→HTTPS 跳转地址。
+	// 证书启用后明文 HTTP 改为 403 拒绝（见 internal/api 的 rejectPlainHTTP），
+	// 不再跳转，此值当前不参与判定，仅为兼容已有 .env 而保留读取。
 	PublicHTTPSPort string
 }
 
@@ -38,6 +43,7 @@ const (
 	envEncryptionKey     = "OCI_MANAGER_ENCRYPTION_KEY"
 	envWebDir            = "OCI_MANAGER_WEB_DIR"
 	envAllowInsecureHTTP = "OCI_MANAGER_ALLOW_HTTP"
+	envDisablePlainHTTP  = "OCI_MANAGER_HTTP_DISABLED"
 	envPublicHTTPSPort   = "OCI_MANAGER_PUBLIC_HTTPS_PORT"
 )
 
@@ -52,6 +58,7 @@ func Load() (*Config, error) {
 		DBPath:            envOrDefault(envDBPath, "./data/oci-manager.db"),
 		WebDir:            os.Getenv(envWebDir),
 		AllowInsecureHTTP: os.Getenv(envAllowInsecureHTTP) == "true" || os.Getenv(envAllowInsecureHTTP) == "1",
+		DisablePlainHTTP:  os.Getenv(envDisablePlainHTTP) == "true" || os.Getenv(envDisablePlainHTTP) == "1",
 		PublicHTTPSPort:   envOrDefault(envPublicHTTPSPort, "443"),
 	}
 

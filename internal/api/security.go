@@ -87,6 +87,32 @@ func (s *Server) securityHeaders() gin.HandlerFunc {
 	}
 }
 
+// rejectPlainHTTP 在部署脚本已切到 HTTPS 模式后拒绝明文 HTTP 业务请求。
+//
+// 判定依据：install.sh 注入的 DisablePlainHTTP（只有宿主机端口确实切成只映射
+// 443 时才为 true）、服务端真实证书 HasCertificate()、以及真实连接 c.Request.TLS。
+// 绝不读取客户端可伪造的 X-Forwarded-Proto；engine 已 SetTrustedProxies(nil)。
+// 这样证书刚签发但用户尚未重跑脚本时，HTTP 仍可访问，不会被锁在门外。
+// /api/health 是容器内 Docker 健康检查路径，始终放行，且不依赖宿主机 HTTP 映射。
+// OCI_MANAGER_ALLOW_HTTP=true 是既有的排障 / 反代逃生阀，保持可用。
+func (s *Server) rejectPlainHTTP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.URL.Path == "/api/health" {
+			c.Next()
+			return
+		}
+		if s.cfg != nil && s.cfg.DisablePlainHTTP && !s.cfg.AllowInsecureHTTP &&
+			s.tlsMgr != nil && s.tlsMgr.HasCertificate() &&
+			c.Request.TLS == nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "HTTP 已被禁用，请改用 HTTPS 访问（Plain HTTP is disabled; please use HTTPS）",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 var (
 	reURLUserinfo   = regexp.MustCompile(`(https?://)[^/@\s]+@`)
 	reBotToken      = regexp.MustCompile(`(/bot)[^/\s]+`)

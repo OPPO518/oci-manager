@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
-import { OtpConfirm } from '../components/OtpConfirm'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnchoredMenu } from '../components/AnchoredMenu'
 import { usePageAction } from '../components/Layout'
+import { OtpConfirm } from '../components/OtpConfirm'
 import {
+  ActionsMenu,
   Badge,
   Card,
   EmptyState,
@@ -14,11 +16,14 @@ import {
   Stat,
   SuccessBanner,
   Switch,
+  usePager,
+  type ActionItem,
 } from '../components/ui'
 import { api } from '../lib/api'
 import { useAccount } from '../lib/context'
 import { formatDateTime, truncate } from '../lib/format'
 import type {
+  BootVolume,
   IpRotationSettings,
   PublicIp,
   RotateIpResult,
@@ -27,7 +32,14 @@ import type {
   Vnic,
 } from '../lib/types'
 
-type Tab = 'vnics' | 'ips' | 'security'
+type Tab = 'vnics' | 'boot' | 'ips' | 'security'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'vnics', label: 'VNIC' },
+  { id: 'boot', label: '引导卷' },
+  { id: 'ips', label: '公网 IP' },
+  { id: 'security', label: '安全列表' },
+]
 
 const EMPTY_VNIC_FORM = { display_name: '', hostname_label: '' }
 
@@ -46,6 +58,69 @@ const EMPTY_RULE_FORM = {
 }
 
 type RuleForm = typeof EMPTY_RULE_FORM
+
+/** 官网风格「操作 ▾」下拉：复用 portal 化菜单，不会被表格容器裁剪 */
+function ActionDropdown({ items, label = '操作' }: { items: ActionItem[]; label?: string }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLButtonElement>(null)
+  return (
+    <span className="oci-actions">
+      <button
+        ref={ref}
+        type="button"
+        className="oci-btn-secondary"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label}
+        <Icon name="chevron-down" size={14} />
+      </button>
+      <AnchoredMenu open={open} anchorRef={ref} onClose={() => setOpen(false)}>
+        {items.map((it, i) => (
+          <div key={i}>
+            {it.separatorBefore && <div className="oci-actions-sep" />}
+            <button
+              type="button"
+              className={`oci-actions-item ${it.danger ? 'is-danger' : ''}`}
+              disabled={it.disabled}
+              onClick={() => {
+                setOpen(false)
+                it.onSelect()
+              }}
+            >
+              {it.label}
+            </button>
+          </div>
+        ))}
+      </AnchoredMenu>
+    </span>
+  )
+}
+
+/** 状态值中文（Badge 已能自动中文化，这里用于筛选下拉的纯文本） */
+const STATE_TEXT: Record<string, string> = {
+  AVAILABLE: '可用',
+  ASSIGNED: '已分配',
+  UNASSIGNED: '未分配',
+  RUNNING: '正在运行',
+  STOPPED: '已停止',
+  TERMINATED: '已终止',
+  PROVISIONING: '正在预配',
+  ACTIVE: '有效',
+  INACTIVE: '无效',
+  EPHEMERAL: '临时',
+  RESERVED: '预留',
+}
+
+function stateText(value: string): string {
+  return STATE_TEXT[value] ?? value
+}
+
+function lifetimeText(value: string): string {
+  return STATE_TEXT[value] ?? value
+}
 
 function formatPorts(rule: SecurityRule): string {
   const parts: string[] = []
@@ -129,7 +204,7 @@ function RuleTable({
             <tbody>
               {rules.map((rule, index) => (
                 <tr key={index}>
-                  <td className="font-mono text-xs">{rule.protocol}</td>
+                  <td className="font-mono text-xs">{rule.protocol || '—'}</td>
                   <td className="font-mono text-xs">{rule.source || '—'}</td>
                   <td className="text-xs">{rule.source_type || '—'}</td>
                   <td className="font-mono text-xs">{rule.destination || '—'}</td>
@@ -171,6 +246,7 @@ export default function Network() {
 
   const [tab, setTab] = useState<Tab>('vnics')
   const [vnics, setVnics] = useState<Vnic[]>([])
+  const [boots, setBoots] = useState<BootVolume[]>([])
   const [ips, setIps] = useState<PublicIp[]>([])
   const [lists, setLists] = useState<SecurityList[]>([])
   const [rotation, setRotation] = useState<IpRotationSettings | null>(null)
@@ -179,6 +255,13 @@ export default function Network() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busy, setBusy] = useState('')
+
+  // 工具栏：搜索 / 筛选 / 视图
+  const [searchInput, setSearchInput] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
+  const [stateFilter, setStateFilter] = useState('ALL')
+  const [showOcid, setShowOcid] = useState(false)
+  const [copiedId, setCopiedId] = useState('')
 
   // VNIC 改名
   const [vnicEdit, setVnicEdit] = useState<Vnic | null>(null)
@@ -199,7 +282,7 @@ export default function Network() {
   const [ruleForm, setRuleForm] = useState<RuleForm>(EMPTY_RULE_FORM)
 
   usePageAction(
-    <button type="button" className="oci-btn-secondary" onClick={() => void load()}>
+    <button type="button" className="oci-btn-secondary" onClick={() => void load()} disabled={loading}>
       <Icon name="refresh" size={15} />
       刷新
     </button>,
@@ -210,13 +293,15 @@ export default function Network() {
     setLoading(true)
     setError('')
     try {
-      const [v, i, s, r] = await Promise.all([
+      const [v, b, i, s, r] = await Promise.all([
         api.network.vnics(account.id, { region: effectiveRegion }),
+        api.storage.bootVolumes(account.id, { region: effectiveRegion }),
         api.network.publicIps(account.id),
         api.network.securityLists(account.id, { region: effectiveRegion }),
         api.ipRotation.get(),
       ])
       setVnics(v)
+      setBoots(b)
       setIps(i)
       setLists(s)
       setRotation(r)
@@ -252,6 +337,79 @@ export default function Network() {
   }, [lists, selectedListId])
 
   const selectedList = lists.find((l) => l.id === selectedListId) ?? null
+
+  // ---- 工具栏筛选（真实过滤当前页签表格）----
+  const matchesName = (value: string) =>
+    !appliedSearch || (value || '').toLowerCase().includes(appliedSearch.toLowerCase())
+  const matchesState = (value: string) => stateFilter === 'ALL' || value === stateFilter
+
+  const filteredVnics = vnics.filter(
+    (v) =>
+      matchesName(`${v.display_name} ${v.hostname_label} ${v.private_ip}`) && matchesState(v.state),
+  )
+  const filteredBoots = boots.filter((b) => matchesName(b.display_name) && matchesState(b.state))
+  const filteredIps = ips.filter(
+    (i) => matchesName(`${i.display_name} ${i.ip_address}`) && matchesState(i.state),
+  )
+
+  // 分页保留 Pager（三个 usePager 均在顶层无条件调用）
+  const vnicPager = usePager(filteredVnics)
+  const bootPager = usePager(filteredBoots)
+  const ipPager = usePager(filteredIps)
+
+  const stateOptions = (() => {
+    const src =
+      tab === 'vnics'
+        ? vnics.map((v) => v.state)
+        : tab === 'boot'
+          ? boots.map((b) => b.state)
+          : tab === 'ips'
+            ? ips.map((i) => i.state)
+            : []
+    return [...new Set(src.filter(Boolean))].sort()
+  })()
+
+  function selectTab(id: Tab) {
+    setTab(id)
+    setStateFilter('ALL')
+  }
+
+  function applySearch() {
+    setAppliedSearch(searchInput.trim())
+  }
+
+  function clearSearch() {
+    setSearchInput('')
+    setAppliedSearch('')
+  }
+
+  function clearFilters() {
+    clearSearch()
+    setStateFilter('ALL')
+  }
+
+  async function copyText(text: string, id: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      window.setTimeout(() => setCopiedId(''), 1800)
+    } catch {
+      setCopiedId('')
+    }
+  }
+
+  const listActions: ActionItem[] = [
+    { label: '刷新资源', onSelect: () => void load() },
+    {
+      label: '清除所有筛选',
+      disabled: !appliedSearch && stateFilter === 'ALL',
+      onSelect: clearFilters,
+    },
+    {
+      label: showOcid ? '隐藏 OCID 辅助信息' : '显示 OCID 辅助信息',
+      onSelect: () => setShowOcid((v) => !v),
+    },
+  ]
 
   async function saveVnic() {
     if (!account || !vnicEdit) return
@@ -355,14 +513,100 @@ export default function Network() {
 
   if (!account) return null
 
-  const TABS: { id: Tab; label: string }[] = [
-    { id: 'vnics', label: 'VNIC' },
-    { id: 'ips', label: '公网 IP' },
-    { id: 'security', label: '安全列表' },
-  ]
-
   return (
-    <div className="space-y-4">
+    <>
+      {/* 白底工具栏：作为彩条的直接兄弟，形成无缝卡片 */}
+      <div className="oci-toolbar">
+        <div className="flex items-center justify-between gap-3">
+          <div className="oci-toolbar-search">
+            <input
+              className="oci-input"
+              placeholder="搜索和筛选"
+              aria-label="搜索和筛选"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applySearch()
+              }}
+            />
+            <button type="button" className="oci-btn-secondary" onClick={applySearch}>
+              <Icon name="search" size={15} />
+              搜索
+            </button>
+          </div>
+          <button
+            type="button"
+            className="oci-toolbar-view"
+            aria-pressed={showOcid}
+            title={showOcid ? '隐藏行辅助信息' : '显示行辅助信息'}
+            aria-label={showOcid ? '隐藏行辅助信息' : '显示行辅助信息'}
+            onClick={() => setShowOcid((v) => !v)}
+          >
+            <Icon name="sliders" size={16} />
+          </button>
+        </div>
+
+        <div className="oci-filter-row">
+          <span className="oci-filter-label">应用的筛选器</span>
+          <span className="oci-filter-chip">区域：{effectiveRegion || '全部区域'}</span>
+          {appliedSearch && (
+            <span className="oci-filter-chip">
+              名称：{appliedSearch}
+              <button
+                type="button"
+                aria-label="清除名称筛选"
+                title="清除名称筛选"
+                onClick={clearSearch}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            </span>
+          )}
+          {stateOptions.length > 0 && (
+            <span className="oci-filter-chip">
+              状态：
+              <select
+                className="max-w-[160px] border-0 bg-transparent text-xs outline-none"
+                value={stateFilter}
+                onChange={(e) => setStateFilter(e.target.value)}
+                aria-label="按状态筛选"
+              >
+                <option value="ALL">全部状态</option>
+                {stateOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {stateText(s)}
+                  </option>
+                ))}
+              </select>
+              {stateFilter !== 'ALL' && (
+                <button
+                  type="button"
+                  aria-label="清除状态筛选"
+                  title="清除状态筛选"
+                  onClick={() => setStateFilter('ALL')}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+
+        <div className="oci-toolbar-actions">
+          <button
+            type="button"
+            className="oci-btn-primary"
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            <Icon name="refresh" size={15} />
+            刷新
+          </button>
+          <ActionDropdown label="操作" items={listActions} />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4">
       {error && <ErrorBanner message={error} onClose={() => setError('')} />}
       {success && <SuccessBanner message={success} onClose={() => setSuccess('')} />}
       {rotateResult && (
@@ -372,13 +616,19 @@ export default function Network() {
         />
       )}
 
-      <div className="oci-tabs">
+      {/* 官网 VCN 页的关联资源说明：没有独立的 VCN 数据，不造空页签 */}
+      <p className="oci-inline-hint">
+        虚拟云网络 (VCN) 是您在 Oracle Cloud Infrastructure 中设置的专用虚拟网络；本面板当前展示其关联资源（VNIC、引导卷、公网
+        IP 与安全列表），可在上方页签间切换。
+      </p>
+
+      <div className="oci-page-tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
-            className={`oci-tab ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
+            className={`oci-page-tab ${tab === t.id ? 'active' : ''}`}
+            onClick={() => selectTab(t.id)}
           >
             {t.label}
           </button>
@@ -386,113 +636,69 @@ export default function Network() {
       </div>
 
       {loading && !loaded ? (
-        <Loading text="正在加载网络资源…" />
+        <div className="oci-panel oci-panel-pad">
+          <Loading text="正在加载网络资源…" />
+        </div>
       ) : (
         <>
           {/* ---------------- VNIC ---------------- */}
           {tab === 'vnics' && (
-            <Card
-              title="虚拟网卡（VNIC）"
-              extra={<span className="text-[13px] text-oracle-muted">{vnics.length} 个 VNIC</span>}
-              bodyClassName="oci-card-body--flush"
-            >
-              {vnics.length === 0 ? (
-                <EmptyState />
-              ) : (
-                <div className="oci-table-wrap">
-                  <table className="oci-table">
-                    <thead>
-                      <tr>
-                        <th>名称</th>
-                        <th>主机名标签</th>
-                        <th>私有 IP</th>
-                        <th>公网 IP</th>
-                        <th>MAC 地址</th>
-                        <th>状态</th>
-                        <th>所属实例</th>
-                        <th className="oci-cell-actions">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vnics.map((item) => (
-                        <tr key={item.id}>
-                          <td className="font-medium">{item.display_name || '(未命名)'}</td>
-                          <td className="font-mono text-xs">{item.hostname_label || '—'}</td>
-                          <td className="font-mono text-xs">{item.private_ip || '—'}</td>
-                          <td className="font-mono text-xs">{item.public_ip || '—'}</td>
-                          <td className="font-mono text-xs">{item.mac_address || '—'}</td>
-                          <td><Badge>{item.state}</Badge></td>
-                          <td className="font-mono text-xs">{truncate(item.instance_id, 16, 0)}</td>
-                          <td className="oci-cell-actions">
-                            <div className="flex justify-end">
-                              <button
-                                type="button"
-                                className="oci-btn-secondary"
-                                disabled={busy === item.id}
-                                onClick={() => openVnicEdit(item)}
-                              >
-                                <Icon name="edit" size={15} />
-                                改名
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-          )}
-
-          {/* ---------------- 公网 IP ---------------- */}
-          {tab === 'ips' && (
-            <div className="space-y-4">
-              <RotationInfo rotation={rotation} />
-              <Card
-                title="公网 IP"
-                extra={<span className="text-[13px] text-oracle-muted">{ips.length} 个地址</span>}
-                bodyClassName="oci-card-body--flush"
-              >
-                <p className="px-6 pt-4 text-xs text-oracle-muted">
-                  更换公网 IP 受冷却时间与每日次数限制，并需要二次验证。
-                </p>
-                {ips.length === 0 ? (
+            <div className="oci-panel">
+              <div className="oci-panel-pad flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold">虚拟网卡（VNIC）</span>
+                <span className="oci-inline-hint">共 {filteredVnics.length} 个 VNIC</span>
+              </div>
+              {filteredVnics.length === 0 ? (
+                <div className="oci-panel-pad">
                   <EmptyState />
-                ) : (
+                </div>
+              ) : (
+                <>
                   <div className="oci-table-wrap">
                     <table className="oci-table">
                       <thead>
                         <tr>
-                          <th>IP 地址</th>
                           <th>名称</th>
-                          <th>生命周期</th>
-                          <th>私有 IP ID</th>
+                          <th>主机名标签</th>
+                          <th>私有 IP</th>
+                          <th>公网 IP</th>
+                          <th>MAC 地址</th>
                           <th>状态</th>
+                          <th>所属实例</th>
                           <th className="oci-cell-actions">操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {ips.map((item) => (
+                        {vnicPager.paged.map((item) => (
                           <tr key={item.id}>
-                            <td className="font-mono font-medium">{item.ip_address}</td>
-                            <td>{item.display_name || '—'}</td>
-                            <td className="text-xs"><Badge tone="info">{item.lifetime}</Badge></td>
-                            <td className="font-mono text-xs" title={item.private_ip_id}>
-                              {truncate(item.private_ip_id, 18, 0)}
+                            <td className="font-medium">
+                              {item.display_name || '(未命名)'}
+                              {showOcid && (
+                                <span className="oci-ocid oci-hint" title={item.id}>
+                                  {item.id}
+                                </span>
+                              )}
                             </td>
+                            <td className="font-mono text-xs">{item.hostname_label || '—'}</td>
+                            <td className="font-mono text-xs">{item.private_ip || '—'}</td>
+                            <td className="font-mono text-xs">{item.public_ip || '—'}</td>
+                            <td className="font-mono text-xs">{item.mac_address || '—'}</td>
                             <td><Badge>{item.state}</Badge></td>
+                            <td className="font-mono text-xs">
+                              {item.instance_id ? truncate(item.instance_id, 16, 0) : '—'}
+                            </td>
                             <td className="oci-cell-actions">
                               <div className="flex justify-end">
-                                <button
-                                  type="button"
-                                  className="oci-btn-secondary"
-                                  disabled={!item.private_ip_id}
-                                  onClick={() => setRotateConfirm(item)}
-                                >
-                                  <Icon name="rotate" size={15} />
-                                  更换公网 IP
-                                </button>
+                                <ActionsMenu
+                                  label="VNIC 操作"
+                                  items={[
+                                    {
+                                      label: '改名',
+                                      disabled: busy === item.id,
+                                      onSelect: () => openVnicEdit(item),
+                                    },
+                                  ]}
+                                />
                               </div>
                             </td>
                           </tr>
@@ -500,8 +706,168 @@ export default function Network() {
                       </tbody>
                     </table>
                   </div>
+                  {vnicPager.pager}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ---------------- 引导卷 ---------------- */}
+          {tab === 'boot' && (
+            <div className="oci-panel">
+              <div className="oci-panel-pad flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold">引导卷</span>
+                <span className="oci-inline-hint">共 {filteredBoots.length} 个引导卷</span>
+              </div>
+              {filteredBoots.length === 0 ? (
+                <div className="oci-panel-pad">
+                  <EmptyState />
+                </div>
+              ) : (
+                <>
+                  <div className="oci-table-wrap">
+                    <table className="oci-table">
+                      <thead>
+                        <tr>
+                          <th>名称</th>
+                          <th>状态</th>
+                          <th>大小</th>
+                          <th>默认性能</th>
+                          <th>可用性域</th>
+                          <th>备份策略</th>
+                          <th>创建时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bootPager.paged.map((item) => (
+                          <tr key={item.id}>
+                            <td className="font-medium">
+                              {item.display_name || '(未命名)'}
+                              {showOcid && (
+                                <span className="oci-ocid oci-hint" title={item.id}>
+                                  {item.id}
+                                </span>
+                              )}
+                            </td>
+                            <td><Badge>{item.state}</Badge></td>
+                            <td className="text-xs">{item.size_gbs ? `${item.size_gbs} GB` : '—'}</td>
+                            <td className="text-xs">
+                              {item.vpus_per_gb ? `${item.vpus_per_gb} VPUs/GB` : '—'}
+                            </td>
+                            <td
+                              className="font-mono text-xs"
+                              title={item.availability_domain || undefined}
+                            >
+                              {item.availability_domain
+                                ? truncate(item.availability_domain, 20, 0)
+                                : '—'}
+                            </td>
+                            <td className="text-xs">—</td>
+                            <td className="text-xs">—</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {bootPager.pager}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ---------------- 公网 IP ---------------- */}
+          {tab === 'ips' && (
+            <div className="space-y-4">
+              <RotationInfo rotation={rotation} />
+              <div className="oci-panel">
+                <div className="oci-panel-pad">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold">公网 IP</span>
+                    <span className="oci-inline-hint">共 {filteredIps.length} 个地址</span>
+                  </div>
+                  <p className="oci-inline-hint mt-2">
+                    更换公网 IP 受冷却时间与每日次数限制，并需要二次验证。
+                  </p>
+                </div>
+                {filteredIps.length === 0 ? (
+                  <div className="oci-panel-pad">
+                    <EmptyState />
+                  </div>
+                ) : (
+                  <>
+                    <div className="oci-table-wrap">
+                      <table className="oci-table">
+                        <thead>
+                          <tr>
+                            <th>IP 地址</th>
+                            <th>名称</th>
+                            <th>生命周期</th>
+                            <th>私有 IP</th>
+                            <th>状态</th>
+                            <th className="oci-cell-actions">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ipPager.paged.map((item) => (
+                            <tr key={item.id}>
+                              <td className="font-mono font-medium">
+                                {item.ip_address || '—'}
+                                {showOcid && (
+                                  <span className="oci-ocid oci-hint" title={item.id}>
+                                    {item.id}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="text-xs">{item.display_name || '—'}</td>
+                              <td className="text-xs">
+                                <Badge tone="info">{lifetimeText(item.lifetime)}</Badge>
+                              </td>
+                              {/* 数据里只有 private_ip_id（OCID），没有私有 IP 地址：
+                                  绝不把 OCID 当成 IP 平铺，显示 —，完整 OCID 放进 title + 复制按钮 */}
+                              <td>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="text-xs text-oracle-muted"
+                                    title={item.private_ip_id || '无私用 IP 关联'}
+                                  >
+                                    —
+                                  </span>
+                                  {item.private_ip_id && (
+                                    <button
+                                      type="button"
+                                      className="oci-copy-btn"
+                                      title={`复制完整 OCID：${item.private_ip_id}`}
+                                      onClick={() => void copyText(item.private_ip_id, item.id)}
+                                    >
+                                      {copiedId === item.id ? '已复制' : '复制'}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td><Badge>{item.state}</Badge></td>
+                              <td className="oci-cell-actions">
+                                <div className="flex justify-end">
+                                  <ActionsMenu
+                                    label="公网 IP 操作"
+                                    items={[
+                                      {
+                                        label: '更换公网 IP',
+                                        disabled: !item.private_ip_id,
+                                        onSelect: () => setRotateConfirm(item),
+                                      },
+                                    ]}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {ipPager.pager}
+                  </>
                 )}
-              </Card>
+              </div>
             </div>
           )}
 
@@ -544,7 +910,8 @@ export default function Network() {
                 </div>
                 {selectedList && (
                   <p className="mt-3 text-xs text-oracle-muted">
-                    VCN：{truncate(selectedList.vcn_id, 24, 0)} · 入站 {draftIngress.length} 条 · 出站 {draftEgress.length} 条
+                    VCN：{truncate(selectedList.vcn_id, 24, 0)} · 入站 {draftIngress.length} 条 · 出站{' '}
+                    {draftEgress.length} 条
                   </p>
                 )}
               </Card>
@@ -579,6 +946,7 @@ export default function Network() {
           )}
         </>
       )}
+      </div>
 
       {/* VNIC 改名 */}
       {vnicEdit && (
@@ -650,10 +1018,10 @@ export default function Network() {
               </div>
               <div>
                 <dt className="text-xs text-oracle-muted">生命周期</dt>
-                <dd className="mt-1">{rotateConfirm.lifetime}</dd>
+                <dd className="mt-1">{lifetimeText(rotateConfirm.lifetime)}</dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-xs text-oracle-muted">关联的私有 IP ID</dt>
+                <dt className="text-xs text-oracle-muted">关联的私有 IP ID（OCID）</dt>
                 <dd className="mt-1 break-all font-mono text-xs">{rotateConfirm.private_ip_id || '—'}</dd>
               </div>
             </dl>
@@ -818,6 +1186,6 @@ export default function Network() {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   )
 }

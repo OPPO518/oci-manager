@@ -169,12 +169,13 @@ export default function Capacity() {
         title="探测结果"
         extra={
           result ? (
-            <div className="flex items-center gap-3 text-xs text-oracle-muted">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-oracle-muted">
               <span>
-                有库存 <strong className="text-oracle-green">{availableCount}</strong> / {result.items.length}
+                共 {result.items.length} 个可用域，其中{' '}
+                <strong className="text-oracle-ink">{availableCount}</strong> 个有库存
               </span>
               <span>·</span>
-              <span>{formatDateTime(result.checked_at)}</span>
+              <span>刷新于 {formatDateTime(result.checked_at)}</span>
             </div>
           ) : undefined
         }

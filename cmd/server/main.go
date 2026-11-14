@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -76,35 +75,20 @@ func run() error {
 	}
 
 	handler := srv.Handler()
-	// 证书签发后，HTTP 只留本机健康检查；外部访问一律 308 跳到 HTTPS，
-	// 避免登录密码、OTP 与 OCI 私钥继续走明文。反代已终结 TLS 或排障时可设
-	// OCI_MANAGER_ALLOW_HTTP=true 关闭跳转。
-	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/health" {
-			handler.ServeHTTP(w, r)
-			return
-		}
-		if !cfg.AllowInsecureHTTP && tlsMgr.HasCertificate() && r.TLS == nil {
-			host := r.Host
-			if h, _, err := net.SplitHostPort(host); err == nil {
-				host = h
-			}
-			if cfg.PublicHTTPSPort != "" && cfg.PublicHTTPSPort != "443" {
-				host = net.JoinHostPort(host, cfg.PublicHTTPSPort)
-			}
-			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
-			return
-		}
-		handler.ServeHTTP(w, r)
-	})
+	// 证书签发后的明文 HTTP 拒绝统一由 internal/api 的 rejectPlainHTTP 中间件处理：
+	// 业务请求一律 403，仅容器内 /api/health 放行（Docker 健康检查不依赖宿主机
+	// HTTP 端口映射）。这里不再做 308 跳转；判定基于真实 TLS 连接，不信任客户端
+	// 可伪造的 X-Forwarded-Proto。反代终结 TLS 或排障时可设
+	// OCI_MANAGER_ALLOW_HTTP=true 作为逃生阀。
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpHandler,
+		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
-	// HTTPS 监听始终启动。尚未配置证书时握手会失败，但 HTTP 端口始终可用，
-	// 因此用户一定能够进入后台完成配置；申请成功后证书热加载、立即生效。
+	// HTTPS 监听始终启动（容器内 8443）。尚未配置证书时握手会失败，但容器内
+	// HTTP 8080 始终可用，用户仍能进入后台完成配置；证书热加载后立即生效。
+	// 对外是否暴露 HTTP / HTTPS 端口由 install.sh 生成的 compose override 决定。
 	httpsSrv := &http.Server{
 		Addr:              cfg.HTTPSAddr,
 		Handler:           handler,
@@ -120,7 +104,7 @@ func run() error {
 		log.Printf("OCI 管理器已启动，HTTP 监听 %s，HTTPS 监听 %s（加密密钥指纹 %s）",
 			cfg.Addr, cfg.HTTPSAddr, cfg.KeyFingerprintHex())
 		if !tlsMgr.HasCertificate() {
-			log.Printf("尚未启用 HTTPS：请先不要录入真实 OCI 凭证，在「设置 → HTTPS 证书」配置证书后会自动跳转")
+			log.Printf("尚未启用 HTTPS：请先不要录入真实 OCI 凭证；在「设置 → HTTPS 证书」配置证书后请重跑一键脚本关闭 HTTP 访问")
 		}
 		if st, err := authSvc.Status(); err == nil && !st.Initialized {
 			log.Printf("尚未设置管理员账号，请打开面板完成初始化设置")

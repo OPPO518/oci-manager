@@ -18,6 +18,9 @@ web/.vite/
 internal/web/dist/*
 !internal/web/dist/.gitkeep
 
+# 由 install.sh 按 HTTP / HTTPS 模式生成的端口映射覆盖文件（每台 VPS 不同）
+docker-compose.override.yml
+
 # 本地数据与密钥
 data/
 .smoke/
