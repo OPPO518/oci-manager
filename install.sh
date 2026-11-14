@@ -130,7 +130,8 @@ services:
       OCI_MANAGER_DB: "/data/oci-manager.db"
       OCI_MANAGER_ENCRYPTION_KEY: ${OCI_MANAGER_ENCRYPTION_KEY:?请先在 .env 中设置 OCI_MANAGER_ENCRYPTION_KEY}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/api/health"]
+      # GET 探测：--spider 发 HEAD，/api/health 只注册了 GET，会被判 404
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -217,19 +218,46 @@ info "正在启动服务…"
 (cd "$DIR" && $COMPOSE up -d)
 
 # ---------- 8. 健康检查 ----------
+# 两条探测路径，任一成功即视为就绪：
+#   1) 容器内 GET：绕过宿主机端口映射、防火墙与代理，最可靠；
+#   2) 宿主机 GET：加 --noproxy 避免全局 http_proxy 把 127.0.0.1 也代理走。
+# 注意 wget --spider 发的是 HEAD，而 /api/health 只注册了 GET，不能用它判定。
+probe_health() {
+  local body
+  body="$(cd "$DIR" && $COMPOSE exec -T oci-manager \
+    wget -q -O - http://127.0.0.1:8080/api/health 2>/dev/null || true)"
+  case "$body" in
+    *'"status":"ok"'*) return 0 ;;
+  esac
+  body="$(curl --noproxy '*' -fsS --max-time 3 \
+    "http://127.0.0.1:${HTTP_PORT}/api/health" 2>/dev/null || true)"
+  case "$body" in
+    *'"status":"ok"'*) return 0 ;;
+  esac
+  return 1
+}
+
 info "等待服务就绪…"
 OK=0
 for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/health" >/dev/null 2>&1; then
-    OK=1
-    break
-  fi
+  if probe_health; then OK=1; break; fi
   sleep 2
 done
 
 if [ "$OK" -ne 1 ]; then
   (cd "$DIR" && $COMPOSE logs --tail=30) || true
-  fail "服务未能在 60 秒内就绪，请查看上方日志"
+  {
+    printf '\n'
+    warn "容器内与宿主机均未探测到 /api/health，请按下列命令确认："
+    printf '  容器状态：  cd %s && %s ps\n' "$DIR" "$COMPOSE"
+    printf '  端口映射：  docker inspect oci-manager --format "{{json .HostConfig.PortBindings}}"\n'
+    printf '  端口监听：  sudo ss -tlnp | grep :%s\n' "$HTTP_PORT"
+    printf '  手动探测：  curl --noproxy "*" -v http://127.0.0.1:%s/api/health\n' "$HTTP_PORT"
+    printf '  若容器已 Running 且日志显示「已启动」，多为全局 http_proxy 干扰，\n'
+    printf '  浏览器仍可直接访问面板，健康检查失败不影响使用。\n'
+    printf '\n'
+  } >&2
+  fail "健康检查未通过（容器可能已正常启动，请按上方命令确认）"
 fi
 
 IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '<服务器IP>')"

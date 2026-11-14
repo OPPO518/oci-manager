@@ -73,6 +73,9 @@ func (s *Server) registerRoutes() {
 	public := s.engine.Group("/api")
 	{
 		public.GET("/health", s.health)
+		// Docker healthcheck / wget --spider 发的是 HEAD，Gin 不会自动把 HEAD 映射到 GET，
+		// 不单独注册就会落到 NoRoute 返回 404，容器被误标为 unhealthy。
+		public.HEAD("/health", s.health)
 		public.POST("/auth/setup", s.authSetup)
 		public.POST("/auth/login", s.authLogin)
 		public.POST("/auth/otp", s.authVerifyOTP)

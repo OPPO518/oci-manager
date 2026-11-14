@@ -60,7 +60,9 @@ ENV OCI_MANAGER_ADDR=:8080 \
     OCI_MANAGER_HTTPS_ADDR=:8443 \
     OCI_MANAGER_DB=/data/oci-manager.db
 
+# 用 GET 而非 --spider(HEAD)：/api/health 历来只注册 GET，HEAD 会被判为 404，
+# 导致容器一直显示 unhealthy。这样旧镜像也能通过健康检查。
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget --spider -q http://127.0.0.1:8080/api/health || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/oci-manager"]

@@ -323,6 +323,7 @@ sudo ufw enable
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
 | 一键脚本报 `failed to bind host port 0.0.0.0:443/tcp: address already in use` | 443 被 nginx / 宝塔 / 旧容器占用。见「零、一键部署 → 443 端口被占用」：停用占用者，或改用 `sudo OCI_MANAGER_HTTPS_PORT=8443 bash /tmp/oci-install.sh` |
+| 一键脚本最后报「健康检查未通过」，日志里 `HEAD "/api/health"` 全是 404 | `/api/health` 原先只注册 GET，而 healthcheck 的 `wget --spider` 发 HEAD。现已改为 GET 探测并给后端补了 HEAD 路由。另外宿主机全局 `http_proxy` 会把 `curl 127.0.0.1` 代理走，用 `curl --noproxy '*' -i http://127.0.0.1:8080/api/health` 验证。只要日志出现「OCI 管理器已启动」，服务就可用，健康检查失败不影响访问 |
 | 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:101 data` 后 `docker compose up -d`（一键脚本已自动处理） |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
 | 一键脚本报「拉取失败」 | Actions 还没产出镜像，或仓库为私有。到 Actions 页确认构建成功；私有仓库先 `docker login ghcr.io` |
