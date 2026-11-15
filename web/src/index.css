@@ -1288,25 +1288,25 @@
     color: var(--rw-ink-2);
   }
 
-  /* ---------- 登录双栏 ---------- */
+  /* ---------- 登录双栏：左品牌 1/3，右表单 2/3 ---------- */
   .oci-login-shell {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 2fr;
     min-height: 100vh;
   }
 
   .oci-login-brand {
     background: var(--rw-topbar);
     color: #fff;
-    padding: 56px;
+    padding: 48px;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 28px;
+    gap: 24px;
   }
 
   .oci-login-brand .oci-wordmark {
-    font-size: 34px;
+    font-size: 30px;
   }
 
   .oci-login-brand-tagline {
