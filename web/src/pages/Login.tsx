@@ -1,11 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { ErrorBanner, Icon } from '../components/ui'
-import { BrandMark } from '../components/Brand'
 import { useAuth } from '../lib/auth'
 
 /**
- * 统一认证卡：登录 / 二次验证 / 首次初始化共用同一套 Oracle Redwood 外观
- * （顶部彩色细条 + 自绘 OCI Manager 标识 + 黑色宽主按钮 + 蓝色次要链接）。
+ * 统一认证卡：登录 / 二次验证 / 首次初始化共用同一套 Oracle 官网外观
+ * （顶部彩色细条 + 深色 ORACLE Cloud 字标 + 黑色宽主按钮 + 蓝色次要链接）。
  */
 function AuthCard({
   title,
@@ -25,8 +24,19 @@ function AuthCard({
       <div className="oci-auth-strip" />
       <div className="oci-auth-body">
         <div className="oci-auth-brand">
-          <BrandMark size={30} />
-          <span className="oci-auth-brand-name">OCI Manager</span>
+          <svg
+            className="oci-auth-brand-logo"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              d="M7.2 18.2a4 4 0 0 1 .4-7.97 6 6 0 0 1 11.5 1.27A3.5 3.5 0 0 1 18 18.2H7.2z"
+              fill="#c74634"
+            />
+          </svg>
+          <span className="oci-wordmark">ORACLE</span>
+          <span className="oci-auth-brand-cloud">Cloud</span>
         </div>
         <h1 className="oci-auth-title">{title}</h1>
         {subtitle && <p className="oci-auth-sub">{subtitle}</p>}
@@ -51,7 +61,6 @@ export default function Login() {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [help, setHelp] = useState<'reset' | 'help' | null>(null)
   const [showMethods, setShowMethods] = useState(false)
 
   const needSetup = !status?.initialized
@@ -105,25 +114,21 @@ export default function Login() {
 
   return (
     <div className="oci-login-shell">
-      {/* 左：品牌区（占窗口宽度 1/3） */}
+      {/* 左：品牌区 */}
       <div className="oci-login-brand">
-        <div className="oci-brand-head">
-          <BrandMark size={52} />
-          <span className="oci-brand-name">OCI Manager</span>
-        </div>
+        <span className="oci-wordmark">ORACLE</span>
         <div>
-          <div className="oci-login-brand-tagline">Oracle Cloud 多账号自托管管理器</div>
+          <div className="oci-login-brand-tagline">Oracle Cloud Infrastructure</div>
           <p className="oci-login-brand-copy mt-4">
-            在一个控制台里统一管理多个 OCI 账号的实例、容量、抢购与成本，
+            在一个控制台中管理计算实例、容量探测、抢购任务与成本用量。
+            <br />
             以 Oracle Redwood 设计语言构建，安全、清晰地掌控你的云资源。
           </p>
         </div>
-        <ul className="oci-login-features">
-          <li>多账号隔离代理，规避风控</li>
-          <li>ARM 实例自动抢购</li>
-          <li>容量探测与成本监控</li>
-          <li>MFA 与 HTTPS 安全加固</li>
-        </ul>
+        <div className="flex items-center gap-3 text-[13px] text-white/60">
+          <span className="inline-block h-1 w-8 rounded bg-oracle-brand" />
+          <span>OCI 管理器 · 自托管面板</span>
+        </div>
       </div>
 
       {/* 右：认证卡 */}
@@ -256,10 +261,7 @@ export default function Login() {
             </AuthCard>
           ) : (
             /* ---------------- 登录（首屏只有用户名和密码） ---------------- */
-            <AuthCard
-              title="登录 OCI Manager"
-              subtitle="使用管理员账号登录面板。"
-            >
+            <AuthCard title="Manager">
               <form onSubmit={submitLogin} className="oci-auth-form">
                 <div className="oci-auth-field">
                   <label htmlFor="login-user">用户名</label>
@@ -288,27 +290,6 @@ export default function Login() {
                   {busy ? '登录中…' : '登录'}
                 </button>
               </form>
-              <div className="oci-auth-links">
-                <button type="button" onClick={() => setHelp(help === 'reset' ? null : 'reset')}>
-                  忘记了密码?
-                </button>
-                <button type="button" onClick={() => setHelp(help === 'help' ? null : 'help')}>
-                  需要登录方面的帮助?
-                </button>
-              </div>
-              {help === 'reset' && (
-                <div className="oci-auth-help">
-                  本面板为单管理员自托管工具，不提供在线找回密码。请在服务器上停止容器后，
-                  删除数据目录中 <code>admins</code> 表的记录并重启，再重新初始化管理员账号。
-                  操作前请先备份数据库文件。
-                </div>
-              )}
-              {help === 'help' && (
-                <div className="oci-auth-help">
-                  请使用首次部署时创建的管理员用户名与密码登录。若启用了 Telegram 两步验证，
-                  密码验证通过后还需要输入一次性验证码。连续输错会触发登录限流，请稍后再试。
-                </div>
-              )}
             </AuthCard>
           )}
         </div>
