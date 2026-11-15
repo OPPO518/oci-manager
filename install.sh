@@ -10,31 +10,33 @@
 # 重复执行即为升级：只拉取最新镜像并重启容器，不会覆盖加密密钥、数据库和证书。
 # 端口写入 $DIR/.env 持久化，升级时沿用（除非显式用环境变量覆盖）。
 #
-# 两种部署模式（按 data/certs/fullchain.pem 是否存在判定，仅在重跑脚本时切换）：
-#   · 首次部署（无证书）：只映射自定义 HTTP 端口 -> 容器 8080，完全不映射 443。
+# 单一访问端口（HTTP 与 HTTPS 共用，由 OCI_MANAGER_PORT 指定）：
+#   · 首次部署（无证书）：只映射 端口 -> 容器 8080（明文 HTTP），完全不映射 443。
 #     没有证书，也避开 443 被 nginx / 面板 / 旧容器占用导致部署失败。
-#   · 证书已签发：宿主机不再暴露 HTTP 端口，只映射 HTTPS 端口 -> 容器 8443，
-#     并提示 HTTP 已关闭。切换不会自动发生，必须用户主动重跑本脚本。
+#   · 证书已签发：宿主机用「同一个端口」映射 -> 容器 8443（HTTPS），
+#     不再强制 443，沿用首次部署时指定的端口走加密连接。
+#     切换不会自动发生，必须用户主动重跑本脚本。
 #
 # 可覆盖的环境变量：
 #   OCI_MANAGER_REPO        仓库 owner/name，默认 OPPO518/oci-manager
 #   OCI_MANAGER_IMAGE       镜像地址，默认 ghcr.io/<repo>:latest
 #   OCI_MANAGER_DIR         安装目录，默认 /opt/oci-manager
-#   OCI_MANAGER_PORT        HTTP 端口，默认 8080（非交互/管道方式用它指定）
-#   OCI_MANAGER_HTTPS_PORT  宿主机 HTTPS 端口，默认 443（写入 .env 持久化）
+#   OCI_MANAGER_PORT        访问端口，默认 8080。HTTP 与 HTTPS 共用此端口
+#                            （非交互/管道方式用它指定；写入 .env 持久化）
 #
-# 首次部署自定义 HTTP 端口（管道方式，绝不进入交互）：
+# 首次部署自定义访问端口（管道方式，绝不进入交互）：
 #   curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh -o /tmp/oci-install.sh
 #   sudo OCI_MANAGER_PORT=8088 bash /tmp/oci-install.sh
-# 证书签发生效后，重跑同一条命令即关闭宿主机 HTTP 端口、只保留 HTTPS。
+# 证书签发生效后，重跑同一条命令即把同一端口从明文 HTTP 切到 HTTPS。
 set -euo pipefail
 
 REPO="${OCI_MANAGER_REPO:-OPPO518/oci-manager}"
 REPO_LC="$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
 IMAGE="${OCI_MANAGER_IMAGE:-ghcr.io/${REPO_LC}:latest}"
 DIR="${OCI_MANAGER_DIR:-/opt/oci-manager}"
-HTTP_PORT="${OCI_MANAGER_PORT:-8080}"
-HTTPS_PORT="${OCI_MANAGER_HTTPS_PORT:-443}"
+# 单一访问端口：HTTP 与 HTTPS 共用。首次部署走明文 HTTP（端口 -> 容器 8080），
+# 证书签发后用同一条命令重跑即切换为 HTTPS（同一端口 -> 容器 8443），不再强制 443。
+PORT="${OCI_MANAGER_PORT:-8080}"
 
 info() { printf '\033[1;32m[信息]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[注意]\033[0m %s\n' "$*"; }
@@ -87,18 +89,14 @@ if [ -f "$DIR/data/oci-manager.db" ]; then
   info "检测到已有数据库，本次升级将完整保留账号、任务与证书"
 fi
 
-# 端口优先级：命令行环境变量 > 已有 .env 中保存的值 > 默认 8080/443。
-# 否则改过端口的部署再次执行一键命令时，会被悄悄改回 443 导致启动失败。
+# 端口优先级：命令行环境变量 > 已有 .env 中保存的值 > 默认 8080。
+# 否则改过端口的部署再次执行一键命令时，会被悄悄改回默认值导致启动失败。
 env_value() {
   sed -n "s/^$1=//p" "$DIR/.env" 2>/dev/null | tail -n1 | tr -d '\r' | sed -e "s/^[\"']//" -e "s/[\"']$//"
 }
 if [ -z "${OCI_MANAGER_PORT+x}" ]; then
   SAVED="$(env_value OCI_MANAGER_PORT)"
-  if [ -n "$SAVED" ]; then HTTP_PORT="$SAVED"; fi
-fi
-if [ -z "${OCI_MANAGER_HTTPS_PORT+x}" ]; then
-  SAVED="$(env_value OCI_MANAGER_HTTPS_PORT)"
-  if [ -n "$SAVED" ]; then HTTPS_PORT="$SAVED"; fi
+  if [ -n "$SAVED" ]; then PORT="$SAVED"; fi
 fi
 
 # ---------- 2b. 判定部署模式（HTTP / HTTPS） ----------
@@ -114,34 +112,31 @@ if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
   info "检测到已签发证书（$CERT_FILE），本次按 HTTPS 模式部署：宿主机不再暴露 HTTP 端口"
 else
   HTTPS_MODE=0
-  info "未检测到证书，按首次部署（HTTP 模式）：只映射 HTTP 端口 ${HTTP_PORT}，完全不映射 443"
+  info "未检测到证书，按首次部署（HTTP 模式）：只映射访问端口 ${PORT} -> 容器 8080，完全不映射 443"
 fi
 
-# 交互式询问 HTTP 端口：仅「首次部署（HTTP 模式）」+ 真终端 + 未通过环境变量
+# 交互式询问访问端口：仅「首次部署（HTTP 模式）」+ 真终端 + 未通过环境变量
 # 显式指定时。纯管道（curl | sudo bash）没有控制终端，[ -t 0 ] 为假，绝不进入
-# read；HTTPS 模式（证书已签发）同样不询问，保证「重跑同一条命令关闭 HTTP」
+# read；HTTPS 模式（证书已签发）同样不询问，保证「重跑同一条命令切换端口映射」
 # 不会被交互卡住。默认值就是上面解析出的端口（升级时为 .env 里已保存的值），
-# 直接回车即保留，不会被改回默认。
+# 直接回车即保留，不会被改回默认。该端口后续 HTTPS 模式会原样复用。
 if [ "$HTTPS_MODE" -eq 0 ] && [ -t 0 ] && [ -z "${OCI_MANAGER_PORT+x}" ]; then
-  printf '请输入首次部署的 HTTP 访问端口（1-65535，直接回车用默认 %s）：' "$HTTP_PORT"
+  printf '请输入访问端口（HTTP/HTTPS 共用，1-65535，直接回车用默认 %s）：' "$PORT"
   IFS= read -r INPUT_PORT || INPUT_PORT=""
   if [ -n "$INPUT_PORT" ]; then
     if ! validate_port "$INPUT_PORT"; then
       fail "端口必须是 1-65535 的纯数字：${INPUT_PORT}"
     fi
-    HTTP_PORT="$((10#$INPUT_PORT))"
+    PORT="$((10#$INPUT_PORT))"
   fi
   printf '\n'
 fi
 
-if ! validate_port "$HTTP_PORT"; then
-  fail "HTTP 端口非法（$HTTP_PORT）：必须是 1-65535 的纯数字"
-fi
-if ! validate_port "$HTTPS_PORT"; then
-  fail "HTTPS 端口非法（$HTTPS_PORT）：必须是 1-65535 的纯数字"
+if ! validate_port "$PORT"; then
+  fail "访问端口非法（$PORT）：必须是 1-65535 的纯数字"
 fi
 
-# 把最终端口写回 .env：以后直接重跑一键命令（不带参数）也不会被改回 443。
+# 把最终端口写回 .env：以后直接重跑一键命令（不带参数）也不会被改回默认值。
 # 用同目录临时文件 + mv 替换，避免破坏密钥行、注释和 600 权限。
 upsert_env() {
   local key="$1" val="$2" file="$DIR/.env" tmp
@@ -152,17 +147,16 @@ upsert_env() {
     mv "$tmp" "$file"
   else
     if ! grep -q '^# 宿主机端口' "$file" 2>/dev/null; then
-      printf '\n# 宿主机端口（由一键脚本写入，修改后重跑脚本即可生效）\n' >>"$file"
+      printf '\n# 宿主机端口（由一键脚本写入，HTTP/HTTPS 共用，修改后重跑脚本即可生效）\n' >>"$file"
     fi
     printf '%s=%s\n' "$key" "$val" >>"$file"
     chmod 600 "$file"
   fi
 }
-upsert_env OCI_MANAGER_PORT "$HTTP_PORT"
-upsert_env OCI_MANAGER_HTTPS_PORT "$HTTPS_PORT"
+upsert_env OCI_MANAGER_PORT "$PORT"
 
 # 导出给 docker compose：端口和镜像同样由这些变量决定
-export OCI_MANAGER_IMAGE="$IMAGE" OCI_MANAGER_PORT="$HTTP_PORT" OCI_MANAGER_HTTPS_PORT="$HTTPS_PORT"
+export OCI_MANAGER_IMAGE="$IMAGE" OCI_MANAGER_PORT="$PORT"
 
 # 已有 git 仓库时沿用它的 compose 文件，避免覆盖后 git pull 冲突。
 # 该 compose 默认的镜像、端口与脚本一致，可以直接 pull + up。
@@ -182,13 +176,13 @@ services:
     restart: unless-stopped
     # 基础 compose 不含 ports：对外映射统一由脚本生成的
     # docker-compose.override.yml 按 HTTP / HTTPS 模式提供。
+    # HTTP 与 HTTPS 共用同一个宿主机端口：HTTP -> 容器 8080，HTTPS -> 容器 8443。
     volumes:
       - ./data:/data
     environment:
       OCI_MANAGER_ADDR: ":8080"
       OCI_MANAGER_HTTPS_ADDR: ":8443"
       OCI_MANAGER_DB: "/data/oci-manager.db"
-      OCI_MANAGER_PUBLIC_HTTPS_PORT: "__HTTPS_PORT__"
       OCI_MANAGER_ENCRYPTION_KEY: ${OCI_MANAGER_ENCRYPTION_KEY:?请先在 .env 中设置 OCI_MANAGER_ENCRYPTION_KEY}
     healthcheck:
       # GET 探测：--spider 发 HEAD，/api/health 只注册了 GET，会被判 404
@@ -200,8 +194,6 @@ services:
 EOF
 
 sed -e "s|__IMAGE__|$IMAGE|g" \
-    -e "s|__HTTP_PORT__|$HTTP_PORT|g" \
-    -e "s|__HTTPS_PORT__|$HTTPS_PORT|g" \
     "$DIR/docker-compose.yml.tpl" >"$DIR/docker-compose.yml"
 rm -f "$DIR/docker-compose.yml.tpl"
 fi
@@ -214,25 +206,28 @@ fi
 # 生成端口映射 override：docker compose 自动加载同目录的
 # docker-compose.override.yml。基础 compose 不含 ports，故这里的 ports 就是
 # 最终对外映射，不会叠加出多余的 443。
+# HTTP 与 HTTPS 共用同一个宿主机端口（OCI_MANAGER_PORT）：
+#   · HTTP 模式  -> 容器 8080
+#   · HTTPS 模式 -> 容器 8443（同一端口，仅切换后端监听）
 # 注意：该文件只在脚本运行时重建，后台热签发证书不会触发重建，因此模式
 # 切换只发生在用户主动重跑脚本时，不会自动把人锁在外面。
 if [ "$HTTPS_MODE" -eq 1 ]; then
 cat >"$DIR/docker-compose.override.yml" <<'OVERRIDE'
 # 由 install.sh 生成，请勿手工编辑或提交到 Git。
-# HTTPS 模式：证书已签发，宿主机不暴露 HTTP，仅映射 HTTPS 端口到容器 8443。
-# OCI_MANAGER_HTTP_DISABLED=1 让后端在此模式下拒绝明文 HTTP 业务请求；
-# 未重跑脚本的旧 HTTP 模式不带这个变量，证书刚签发时不会被锁在门外。
+# HTTPS 模式：证书已签发，把同一个访问端口映射到容器 8443（HTTPS），
+# 不再暴露明文 HTTP。OCI_MANAGER_HTTP_DISABLED=1 让后端在此模式下拒绝明文
+# HTTP 业务请求；未重跑脚本的旧 HTTP 模式不带这个变量，证书刚签发时不会被锁在门外。
 services:
   oci-manager:
     ports:
-      - "${OCI_MANAGER_HTTPS_PORT}:8443"
+      - "${OCI_MANAGER_PORT}:8443"
     environment:
       OCI_MANAGER_HTTP_DISABLED: "1"
 OVERRIDE
 else
 cat >"$DIR/docker-compose.override.yml" <<'OVERRIDE'
 # 由 install.sh 生成，请勿手工编辑或提交到 Git。
-# 首次部署（HTTP 模式）：只映射自定义 HTTP 端口到容器 8080，完全不映射 443。
+# 首次部署（HTTP 模式）：只映射同一个访问端口到容器 8080，完全不映射 443。
 services:
   oci-manager:
     ports:
@@ -261,17 +256,12 @@ chmod 700 "$DIR/data"
 info "数据目录属主已设为 ${UID_VAL}:${GID_VAL}，权限收紧为 700"
 
 # ---------- 6. 端口预检 ----------
-# 只预检本次真正会映射的宿主机端口：HTTP 模式完全不碰 443（首次部署即使 443
-# 被 nginx / 面板 / 旧容器占用也不会失败），HTTPS 模式不碰 HTTP_PORT。
+# HTTP 与 HTTPS 共用同一个宿主机端口，两种模式映射的就是同一个端口，故只预检它一次。
+# 首次部署即使 443 被 nginx / 面板 / 旧容器占用也不会失败（我们根本不碰 443）。
 # 升级时端口由本项目旧容器占着属于正常情况（compose up 会重建容器），只拦首次安装。
 # 不预检的话 Docker 只抛一句 "address already in use"，很难定位是谁占了端口。
-if [ "$HTTPS_MODE" -eq 1 ]; then
-  CHECK_PORTS=("$HTTPS_PORT")
-  PORT_HINT="OCI_MANAGER_HTTPS_PORT"
-else
-  CHECK_PORTS=("$HTTP_PORT")
-  PORT_HINT="OCI_MANAGER_PORT"
-fi
+CHECK_PORTS=("$PORT")
+PORT_HINT="OCI_MANAGER_PORT"
 
 listener_info() {
   local p="$1"
@@ -333,7 +323,7 @@ probe_health() {
     *'"status":"ok"'*) return 0 ;;
   esac
   body="$(curl --noproxy '*' -fsS --max-time 3 \
-    "http://127.0.0.1:${HTTP_PORT}/api/health" 2>/dev/null || true)"
+    "http://127.0.0.1:${PORT}/api/health" 2>/dev/null || true)"
   case "$body" in
     *'"status":"ok"'*) return 0 ;;
   esac
@@ -354,8 +344,8 @@ if [ "$OK" -ne 1 ]; then
     warn "容器内与宿主机均未探测到 /api/health，请按下列命令确认："
     printf '  容器状态：  cd %s && %s ps\n' "$DIR" "$COMPOSE"
     printf '  端口映射：  docker inspect oci-manager --format "{{json .HostConfig.PortBindings}}"\n'
-    printf '  端口监听：  sudo ss -tlnp | grep :%s\n' "$HTTP_PORT"
-    printf '  手动探测：  curl --noproxy "*" -v http://127.0.0.1:%s/api/health\n' "$HTTP_PORT"
+    printf '  端口监听：  sudo ss -tlnp | grep :%s\n' "$PORT"
+    printf '  手动探测：  curl --noproxy "*" -v http://127.0.0.1:%s/api/health\n' "$PORT"
     printf '  若容器已 Running 且日志显示「已启动」，多为全局 http_proxy 干扰，\n'
     printf '  浏览器仍可直接访问面板，健康检查失败不影响使用。\n'
     printf '\n'
@@ -372,16 +362,15 @@ $(printf '\033[1;32m')
 ║              OCI 管理器部署完成（HTTPS 模式）                  ║
 ╚══════════════════════════════════════════════════════════════╝
 $(printf '\033[0m')
-  访问地址： https://<你的域名>:${HTTPS_PORT}
+  访问地址： https://<你的域名>:${PORT}
   安装目录： ${DIR}
   配置文件： ${DIR}/.env（内含加密密钥，请备份）
 
-  检测到已签发证书，HTTP 已关闭：宿主机不再暴露 HTTP 端口，
-  仅映射 ${HTTPS_PORT} -> 容器 8443（HTTPS）。
-  容器内 127.0.0.1:8080/api/health 仍供 Docker 健康检查，不依赖宿主机映射；
-  若有明文 HTTP 请求仍到达容器，后端一律返回 403（仅 /api/health 放行）。
+  检测到已签发证书：同一个访问端口 ${PORT} 现在映射到容器 8443（HTTPS），
+  不再暴露明文 HTTP。容器内 127.0.0.1:8080/api/health 仍供 Docker 健康检查，
+  不依赖宿主机映射；若有明文 HTTP 请求仍到达容器，后端一律返回 403（仅 /api/health 放行）。
 
-  请放行云厂商安全组的 ${HTTPS_PORT} 端口。
+  请放行云厂商安全组的 ${PORT} 端口（TCP）。
   说明：切换只发生在你主动重跑本脚本时。若证书被删除（或临时需要恢复 HTTP），
         重跑同一条命令即可按证书是否存在重新判定模式。
 
@@ -399,25 +388,25 @@ $(printf '\033[1;32m')
 ║              OCI 管理器部署完成（首次 / HTTP 模式）             ║
 ╚══════════════════════════════════════════════════════════════╝
 $(printf '\033[0m')
-  访问地址： http://${IP}:${HTTP_PORT}
+  访问地址： http://${IP}:${PORT}
   安装目录： ${DIR}
   配置文件： ${DIR}/.env（内含加密密钥，请备份）
 
-  本次仅映射 HTTP 端口 ${HTTP_PORT} -> 容器 8080，完全不映射 443（尚无证书）。
+  本次仅映射访问端口 ${PORT} -> 容器 8080（明文 HTTP），完全不映射 443（尚无证书）。
   容器内 /api/health 健康检查不依赖宿主机 HTTP 映射。
 
   首次打开请设置管理员账号，然后到「设置 → HTTPS 证书」用 Cloudflare DNS-01
   申请域名证书。当前是明文 HTTP，在启用 HTTPS 之前请勿录入真实 OCI API 凭证。
 
-  证书签发生效后，重新执行同一条一键命令即关闭宿主机 HTTP 端口、只保留 HTTPS：
+  证书签发生效后，重新执行同一条一键命令即把同一端口从明文 HTTP 切到 HTTPS：
     curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh -o /tmp/oci-install.sh
-    sudo bash /tmp/oci-install.sh      # 或 sudo OCI_MANAGER_PORT=${HTTP_PORT} bash /tmp/oci-install.sh
+    sudo bash /tmp/oci-install.sh      # 或 sudo OCI_MANAGER_PORT=${PORT} bash /tmp/oci-install.sh
   证书热加载后 HTTP 仍可正常访问，不会把你锁在门外；只有在你重跑上面的命令、
-        宿主机端口真正切成只映射 443 之后，明文 HTTP 业务请求才会返回 403。
+        同一端口真正切成只映射 8443（HTTPS）之后，明文 HTTP 业务请求才会返回 403。
         容器内 /api/health 始终放行，健康检查不受影响。
-  HTTP 端口 ${HTTP_PORT} 已写入 .env，重跑不带参数也会沿用。
+  访问端口 ${PORT} 已写入 .env，重跑不带参数也会沿用。
 
-  请放行云厂商安全组的 ${HTTP_PORT} 端口，并尽快启用 Telegram 两步验证。
+  请放行云厂商安全组的 ${PORT} 端口（TCP），并尽快启用 Telegram 两步验证。
   纯 IP 证书不支持：证书只允许 Cloudflare DNS-01 域名证书；Passkey 需域名 + HTTPS。
 
   常用命令：
@@ -427,6 +416,6 @@ $(printf '\033[0m')
 EOF
 fi
 
-if [ "$HTTPS_MODE" -eq 1 ] && [ "$HTTPS_PORT" != "443" ]; then
-  warn "HTTPS 使用非标准端口 ${HTTPS_PORT}，浏览器需访问 https://域名:${HTTPS_PORT}（或让 Cloudflare 代理到 443）"
+if [ "$PORT" != "443" ]; then
+  warn "使用非标准端口 ${PORT}：浏览器需访问 http(s)://域名:${PORT}（若希望省略端口，请改用 443 或 80 重跑本脚本）。"
 fi

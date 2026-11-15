@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import { ErrorBanner, Icon } from '../components/ui'
+import { BrandMark } from '../components/Brand'
 import { useAuth } from '../lib/auth'
 
 /**
- * 统一认证卡：登录 / 二次验证 / 首次初始化共用同一套 Oracle 官网外观
- * （顶部彩色细条 + 深色 ORACLE Cloud 字标 + 黑色宽主按钮 + 蓝色次要链接）。
+ * 统一认证卡：登录 / 二次验证 / 首次初始化共用同一套 Oracle Redwood 外观
+ * （顶部彩色细条 + 自绘 OCI Manager 标识 + 黑色宽主按钮 + 蓝色次要链接）。
  */
 function AuthCard({
   title,
@@ -24,8 +25,8 @@ function AuthCard({
       <div className="oci-auth-strip" />
       <div className="oci-auth-body">
         <div className="oci-auth-brand">
-          <span className="oci-wordmark">ORACLE</span>
-          <span className="oci-auth-brand-cloud">Cloud</span>
+          <BrandMark size={30} />
+          <span className="oci-auth-brand-name">OCI Manager</span>
         </div>
         <h1 className="oci-auth-title">{title}</h1>
         {subtitle && <p className="oci-auth-sub">{subtitle}</p>}
@@ -104,21 +105,25 @@ export default function Login() {
 
   return (
     <div className="oci-login-shell">
-      {/* 左：品牌区 */}
+      {/* 左：品牌区（占窗口宽度 1/3） */}
       <div className="oci-login-brand">
-        <span className="oci-wordmark">ORACLE</span>
+        <div className="oci-brand-head">
+          <BrandMark size={52} />
+          <span className="oci-brand-name">OCI Manager</span>
+        </div>
         <div>
-          <div className="oci-login-brand-tagline">Oracle Cloud Infrastructure</div>
+          <div className="oci-login-brand-tagline">Oracle Cloud 多账号自托管管理器</div>
           <p className="oci-login-brand-copy mt-4">
-            在一个控制台中管理计算实例、容量探测、抢购任务与成本用量。
-            <br />
+            在一个控制台里统一管理多个 OCI 账号的实例、容量、抢购与成本，
             以 Oracle Redwood 设计语言构建，安全、清晰地掌控你的云资源。
           </p>
         </div>
-        <div className="flex items-center gap-3 text-[13px] text-white/60">
-          <span className="inline-block h-1 w-8 rounded bg-oracle-brand" />
-          <span>OCI 管理器 · 自托管面板</span>
-        </div>
+        <ul className="oci-login-features">
+          <li>多账号隔离代理，规避风控</li>
+          <li>ARM 实例自动抢购</li>
+          <li>容量探测与成本监控</li>
+          <li>MFA 与 HTTPS 安全加固</li>
+        </ul>
       </div>
 
       {/* 右：认证卡 */}
@@ -252,8 +257,8 @@ export default function Login() {
           ) : (
             /* ---------------- 登录（首屏只有用户名和密码） ---------------- */
             <AuthCard
-              title="Oracle Cloud 账户登录"
-              subtitle="使用管理员账号登录 OCI 管理器。"
+              title="登录 OCI Manager"
+              subtitle="使用管理员账号登录面板。"
             >
               <form onSubmit={submitLogin} className="oci-auth-form">
                 <div className="oci-auth-field">

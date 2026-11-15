@@ -131,11 +131,10 @@ cd web && npm run dev   # 前端热更新（:5173，已配置代理到后端）
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `OCI_MANAGER_ADDR` | `:8080` | HTTP 监听地址；证书签发后仅本机健康检查可直连 |
-| `OCI_MANAGER_HTTPS_ADDR` | `:8443` | HTTPS 监听地址，映射到宿主机 443 |
+| `OCI_MANAGER_HTTPS_ADDR` | `:8443` | HTTPS 监听地址；与 HTTP 共用同一个宿主机端口，由部署脚本映射到该端口 |
 | `OCI_MANAGER_DB` | `./data/oci-manager.db` | SQLite 数据库路径（权限自动收紧为 0600） |
 | `OCI_MANAGER_ENCRYPTION_KEY` | **无，必填** | 加密 OCI 私钥；缺失或少于 32 字符会拒绝启动，绝不使用默认值 |
-| `OCI_MANAGER_ALLOW_HTTP` | `false` | 排障时关闭 HTTP→HTTPS 跳转（会降低安全性） |
-| `OCI_MANAGER_PUBLIC_HTTPS_PORT` | `443` | HTTPS 对外端口非 443 时，用于构造跳转地址 |
+| `OCI_MANAGER_ALLOW_HTTP` | `false` | 排障时允许明文 HTTP（会降低安全性） |
 | `OCI_MANAGER_WEB_DIR` | 空 | 指定外部前端目录，为空则使用内嵌资源 |
 
 生成加密密钥：

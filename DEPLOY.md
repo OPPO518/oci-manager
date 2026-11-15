@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
 | 模式 | 条件 | 宿主机对外映射 |
 | --- | --- | --- |
 | 首次部署 / HTTP | 无证书 | 仅 `OCI_MANAGER_PORT` → 容器 `8080`，**完全不映射 443** |
-| HTTPS | 已签发证书 | 仅 `OCI_MANAGER_HTTPS_PORT` → 容器 `8443`，**不再暴露 HTTP 端口** |
+| HTTPS | 已签发证书 | 仅 `OCI_MANAGER_PORT` → 容器 `8443`，**不再暴露 HTTP 端口** |
 
 - 首次不映射 443：没有证书，也避开 443 被 nginx / 面板 / 旧容器占用导致部署失败。
   脚本只预检本次真正会映射的那个端口，不再预检 443。
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
 - 端口写入 `.env` 持久化，升级时沿用（除非显式用环境变量覆盖），不会改回默认。
 - **重复执行同一条命令即为升级**：只拉新镜像并重启，不会覆盖 `.env`、数据库和证书。
 - 可用环境变量覆盖：`OCI_MANAGER_REPO` / `OCI_MANAGER_IMAGE` / `OCI_MANAGER_DIR` /
-  `OCI_MANAGER_PORT` / `OCI_MANAGER_HTTPS_PORT`。
+  `OCI_MANAGER_PORT` / `OCI_MANAGER_PORT`。
 
 ### 首次部署自定义 HTTP 端口（两种写法）
 
@@ -109,8 +109,8 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
 ```
 
 脚本检测到 `data/certs/fullchain.pem` 与 `privkey.pem` 后切换为 HTTPS 模式：
-宿主机不再暴露 HTTP 端口，只映射 `OCI_MANAGER_HTTPS_PORT`（默认 443）→ 容器 8443，
-并提示 HTTP 已关闭。注意事项：
+宿主机用**同一个** `OCI_MANAGER_PORT` 重新映射到容器 8443（HTTPS），不强制 443，
+不再暴露明文 HTTP，并提示 HTTP 已关闭。注意事项：
 
 - **不会把你锁在门外**：证书是热加载的，但禁用明文 HTTP 的开关
   （`OCI_MANAGER_HTTP_DISABLED=1`）只由脚本在 HTTPS 模式下注入。证书刚签发、
@@ -122,7 +122,8 @@ curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh
   默认关闭，正常部署不要开启。
 - 若证书被删除（例如面板里关闭 HTTPS），重跑同一条命令会重新判定为 HTTP 模式，
   恢复 HTTP 端口映射。
-- 切换后请放行安全组的 `443`（或自定义 HTTPS 端口），并关掉原 HTTP 端口。
+- 切换后请放行安全组的 `OCI_MANAGER_PORT`（即为你首次部署时选定的同一端口）；
+  同一个端口已从明文 HTTP 切到 HTTPS，无需再单独关掉 HTTP 端口——它们本就是同一个。
 
 ### 端口映射是怎么切换的
 
@@ -137,7 +138,7 @@ services:
     ports:
       - "${OCI_MANAGER_PORT}:8080"           # 首次部署（HTTP 模式）
       # 证书已签发后，这一行改为：
-      # - "${OCI_MANAGER_HTTPS_PORT}:8443"  # HTTPS 模式，宿主机不暴露 HTTP
+      # - "${OCI_MANAGER_PORT}:8443"  # HTTPS 模式，宿主机不暴露 HTTP
 ```
 
 该文件由脚本生成，不要手工编辑或提交到 Git。容器的 `healthcheck` 走容器内
@@ -176,7 +177,7 @@ sudo OCI_MANAGER_DIR=/root/oci-manager bash /tmp/oci-install.sh
 
 > **首次部署不会再遇到这个问题**：没有证书时脚本只映射你选的 HTTP 端口，
 > 完全不映射 443，脚本也只预检 HTTP 端口。只有检测到已签发证书、重跑脚本切换为
-> HTTPS 模式时，才会映射 `OCI_MANAGER_HTTPS_PORT`（默认 443）→ 容器 8443。
+> HTTPS 模式时，才会把 `OCI_MANAGER_PORT` 重新映射到容器 8443（HTTPS）。
 
 VPS 上如果已经跑了 nginx、宝塔面板或之前手动部署的旧容器，且已处于 HTTPS 模式，
 重跑脚本时可能在最后一步报：
@@ -201,7 +202,7 @@ docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
    ```bash
    curl -fsSL https://raw.githubusercontent.com/OPPO518/oci-manager/main/install.sh \
      -o /tmp/oci-install.sh
-   sudo OCI_MANAGER_HTTPS_PORT=8443 bash /tmp/oci-install.sh
+   sudo OCI_MANAGER_PORT=8443 bash /tmp/oci-install.sh
    ```
 
    此时浏览器需访问 `https://域名:8443`；若域名走 Cloudflare 代理，访客仍可用
@@ -341,8 +342,8 @@ docker run --rm --entrypoint /bin/sh oci-manager:latest -c 'id app'
 >       - "8080:8080"
 > ```
 >
-> 证书签发后改成 `"443:8443"` 即关闭 HTTP、只保留 HTTPS。更简单的做法是直接跑
-> 「零」的一键脚本，由它按证书状态自动切换。
+> 证书签发后把同一端口改成 `"OCI_MANAGER_PORT:8443"` 即关闭明文 HTTP、只保留 HTTPS。
+> 更简单的做法是直接跑「零」的一键脚本，由它按证书状态自动切换。
 
 ```bash
 docker compose up -d --build
@@ -403,17 +404,18 @@ docker image prune -f             # 清理旧镜像，可选
 
 - 首次部署只映射 HTTP 端口、不映射 443，此时用 `http://IP:端口` 进入面板配置证书。
 - 证书热加载成功后，后端立即对明文 HTTP 业务请求返回 **403**（仅容器内
-  `/api/health` 放行）。此时首次部署尚未映射 443，**请立即重跑同一条一键命令**：
-  脚本检测到 `data/certs/fullchain.pem` 后切换为 HTTPS 模式，关闭宿主机 HTTP 端口、
-  只映射 `443->8443`，之后访问 `https://你的域名`。
+  `/api/health` 放行）。此时首次部署尚未切换端口，**请立即重跑同一条一键命令**：
+  脚本检测到 `data/certs/fullchain.pem` 后切换为 HTTPS 模式，把同一个 `OCI_MANAGER_PORT`
+  重新映射到 `8443`（HTTPS），之后访问 `https://你的域名:OCI_MANAGER_PORT`。
 - 切换**不会自动发生**：端口映射只在用户主动重跑脚本时重建，后台签发 / 续期证书
   不会偷偷改端口把人锁在外面。
-- 若来不及重跑而被 403 挡住，可临时在 `docker-compose.override.yml` 里补一条
-  `"443:8443"` 映射并 `docker compose up -d` 恢复访问，再重跑脚本。
+- 若来不及重跑而被 403 挡住，可临时在 `docker-compose.override.yml` 里把
+  `${OCI_MANAGER_PORT}:8080` 改成 `${OCI_MANAGER_PORT}:8443` 并 `docker compose up -d`
+  恢复访问，再重跑脚本。
 - 证书配置失败不会删除已有证书，也不会提前关闭 HTTP 端口。
 
 启用后请放行云厂商安全组的 `443` 端口（若改用非标准端口，见「零」的
-`OCI_MANAGER_HTTPS_PORT`）。
+`OCI_MANAGER_PORT`）。
 
 ### 方案 A：只监听本地 + SSH 隧道（最省事，无需域名）
 
@@ -485,7 +487,7 @@ sudo ufw enable
 
 内置证书走 Cloudflare DNS-01，**不需要 80 端口**，请勿为 80 留例外；也无需
 HTTP-01 / TLS-ALPN-01。首次部署只放行自定义 HTTP 端口；切换 HTTPS 后只放行
-`443`（或 `OCI_MANAGER_HTTPS_PORT` 指定的端口），并关掉原 HTTP 端口。
+`443`（或 `OCI_MANAGER_PORT` 指定的端口），并关掉原 HTTP 端口。
 （方案 A 不需要放行这些端口，只留 22。）
 
 ---
@@ -503,7 +505,7 @@ HTTP-01 / TLS-ALPN-01。首次部署只放行自定义 HTTP 端口；切换 HTTP
 | `golang:1.27-alpine` 拉取失败 | 该标签已确认存在；若仍拉不动多半是镜像源问题，换 `--build-arg GO_IMAGE=golang:1.27-bookworm`（Debian 版，体积大但源更稳） |
 | `failed to solve: base name ($XXX) should not be blank` | `ARG` 写在第一个 `FROM` 之后属于阶段内作用域，无法用于后续 `FROM`。所有用于 `FROM` 的 `ARG` 必须声明在第一个 `FROM` 之前 |
 | `stat /src/cmd/server: directory not found` | `.gitignore` 里裸写 `server` 把 `cmd/server/` 入口目录也忽略了，该文件没进版本库。改成 `/server`，然后 `git add cmd/server/main.go` 重新提交 |
-| 一键脚本报 `failed to bind host port 0.0.0.0:443/tcp: address already in use` | **仅 HTTPS 模式才会映射 443；首次部署完全不映射 443，不会遇到**。若已签发证书，443 被 nginx / 宝塔 / 旧容器占用：见「零、一键部署 → 443 端口被占用」，停用占用者，或改用 `sudo OCI_MANAGER_HTTPS_PORT=8443 bash /tmp/oci-install.sh` |
+| 一键脚本报 `failed to bind host port 0.0.0.0:443/tcp: address already in use` | **仅 HTTPS 模式才会映射 443；首次部署完全不映射 443，不会遇到**。若已签发证书，443 被 nginx / 宝塔 / 旧容器占用：见「零、一键部署 → 443 端口被占用」，停用占用者，或改用 `sudo OCI_MANAGER_PORT=8443 bash /tmp/oci-install.sh` |
 | 一键脚本最后报「健康检查未通过」，日志里 `HEAD "/api/health"` 全是 404 | `/api/health` 原先只注册 GET，而 healthcheck 的 `wget --spider` 发 HEAD。现已改为 GET 探测并给后端补了 HEAD 路由。另外宿主机全局 `http_proxy` 会把 `curl 127.0.0.1` 代理走，用 `curl --noproxy '*' -i http://127.0.0.1:8080/api/health` 验证。只要日志出现「OCI 管理器已启动」，服务就可用，健康检查失败不影响访问 |
 | 容器一直 `Restarting`，日志报 `unable to open database file (14)` | `./data` 属主是 root，容器内的 `app` 用户写不进去。执行 `sudo chown -R 100:101 data` 后 `docker compose up -d`（一键脚本已自动处理） |
 | 容器反复重启 | `docker compose logs` 看报错；最常见是没设 `OCI_MANAGER_ENCRYPTION_KEY` |
@@ -513,7 +515,7 @@ HTTP-01 / TLS-ALPN-01。首次部署只放行自定义 HTTP 端口；切换 HTTP
 | 证书已签发但 `https://域名` 打不开 | 先确认**已重跑一键脚本切换为 HTTPS 模式**（首次部署不映射 443）；放行安全组 443；确认域名已解析到 VPS（DNS-01 不要求申请前解析，但访问时需要） |
 | 容量探测全部显示「状态未知」或报 403 | 该账户无权使用 Compute Capacity Report（需 tenancy 级读取权限）。抢购任务会自动降级为直接创建，也可在「设置 → 抢购策略」关闭预检 |
 | 容量状态显示「有库存」但创建仍失败 | 容量报告是准实时快照，资源可能在两次调用之间被抢走；属正常现象，任务会继续下一轮 |
-| 端口不通 | 首次部署只映射自定义 HTTP 端口（放行它即可，不映射 443）；切换 HTTPS 后只放行 443（或 `OCI_MANAGER_HTTPS_PORT`）。检查 `ufw` 与云厂商安全组 |
+| 端口不通 | 首次部署只映射自定义 HTTP 端口（放行它即可，不映射 443）；切换 HTTPS 后只放行 443（或 `OCI_MANAGER_PORT`）。检查 `ufw` 与云厂商安全组 |
 | 配置证书后立刻被 403 挡住、面板进不去 | 证书热加载后 HTTP 立即 403，而首次部署还没映射 443。重跑同一条一键命令即完成切换；急用可临时在 `docker-compose.override.yml` 里加 `"443:8443"` 再 `docker compose up -d` |
 | 想用纯 IP 上 HTTPS / 不想要域名 | **纯 IP 证书不支持**，证书只允许 Cloudflare DNS-01 域名证书，不开放 80 / HTTP-01 / TLS-ALPN-01；Passkey 需域名 + HTTPS。首次可用 `http://IP:自定义端口`，但仅建议用于配置证书 |
 | 首次部署能否指定端口、升级会不会被改回默认 | 能：`sudo OCI_MANAGER_PORT=8088 bash /tmp/oci-install.sh`（管道/非交互）或本地真终端交互输入；端口写入 `.env`，重跑不带参数会沿用 |
