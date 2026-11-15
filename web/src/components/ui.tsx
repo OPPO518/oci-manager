@@ -57,6 +57,8 @@ export type IconName =
   | 'lock'
   | 'eye-off'
   | 'moon'
+  | 'power'
+  | 'logs'
 
 /** Redwood 线性图标，默认 16px。 */
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
@@ -301,6 +303,18 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
         <path d="M6.4 6.5A2 2 0 008 10c.5 0 1-.2 1.4-.5" />
         <path d="M4 4.7C2.5 5.8 1.5 8 1.5 8s2.5 4.5 6.5 4.5c1 0 1.9-.2 2.7-.6" />
         <path d="M11.6 10.8c1.4-1 2.9-2.8 2.9-2.8S12 3.5 8 3.5c-.5 0-1 .1-1.4.2" />
+      </>
+    ),
+    power: (
+      <>
+        <path d="M8 2v6" />
+        <path d="M5 4.5a5 5 0 108 0" />
+      </>
+    ),
+    logs: (
+      <>
+        <rect x="2" y="2" width="12" height="12" rx="1.5" />
+        <path d="M5 5.5h6M5 8h6M5 10.5h4" />
       </>
     ),
   }
@@ -635,11 +649,13 @@ export function Stat({
   value,
   unit,
   accent,
+  hint,
 }: {
   label: string
   value: ReactNode
   unit?: string
   accent?: 'brand' | 'pine' | 'yellow'
+  hint?: string
 }) {
   return (
     <div className={`oci-stat ${accent ? `oci-stat--${accent}` : ''}`}>
@@ -648,6 +664,7 @@ export function Stat({
         {value}
         {unit && <span className="ml-1 text-sm font-normal text-oracle-muted">{unit}</span>}
       </p>
+      {hint && <p className="oci-stat-hint">{hint}</p>}
     </div>
   )
 }

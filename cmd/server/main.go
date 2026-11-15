@@ -18,8 +18,10 @@ import (
 	"github.com/yourname/oci-manager/internal/auth"
 	"github.com/yourname/oci-manager/internal/config"
 	"github.com/yourname/oci-manager/internal/grabber"
+	"github.com/yourname/oci-manager/internal/logbus"
 	"github.com/yourname/oci-manager/internal/notify"
 	"github.com/yourname/oci-manager/internal/oci"
+	"github.com/yourname/oci-manager/internal/scheduler"
 	"github.com/yourname/oci-manager/internal/secret"
 	"github.com/yourname/oci-manager/internal/store"
 	"github.com/yourname/oci-manager/internal/tlsmanager"
@@ -64,6 +66,14 @@ func run() error {
 
 	authSvc := auth.New(db, notifier)
 	go cleanupLoop(authSvc)
+
+	// 启动定时开关机调度器（按账号独立执行，演示账号短路到内存模拟）。
+	powerScheduler := scheduler.New(db, pool)
+	go powerScheduler.Start(context.Background())
+
+	// 启动日志总线并向其写入启动事件，供「日志查看」页面实时展示。
+	logbus.Default.Publish(logbus.LevelSuccess, logbus.SourceStartup, "",
+		fmt.Sprintf("OCI 管理器已启动（加密密钥指纹 %s，调度器已就绪）", cfg.KeyFingerprintHex()))
 
 	tlsMgr := tlsmanager.New(db, filepath.Join(filepath.Dir(cfg.DBPath), "certs"), cfg.HTTPSAddr)
 	tlsMgr.Load()

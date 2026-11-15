@@ -1,101 +1,92 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AnchoredMenu } from '../components/AnchoredMenu'
 import { usePageAction } from '../components/Layout'
-import {
-  Badge,
-  Card,
-  CardDots,
-  ErrorBanner,
-  Icon,
-  Loading,
-  Stat,
-  type CardAction,
-  type IconName,
-} from '../components/ui'
+import { Badge, Card, ErrorBanner, Icon, Loading, Stat } from '../components/ui'
 import { api } from '../lib/api'
-import { useAccount } from '../lib/context'
 import { formatDateTime, formatMoney } from '../lib/format'
-import type { Overview as OverviewData } from '../lib/types'
+import type { Dashboard } from '../lib/types'
 
-type ResourceRow = { name: string; type: string; state: string; note: string; to: string }
+function Donut({ running, stopped }: { running: number; stopped: number }) {
+  const total = Math.max(1, running + stopped)
+  const r = 52
+  const c = 2 * Math.PI * r
+  const runPct = running / total
+  return (
+    <div className="flex items-center gap-5">
+      <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
+        <circle cx="70" cy="70" r={r} fill="none" stroke="var(--rw-border)" strokeWidth="16" />
+        <circle
+          cx="70"
+          cy="70"
+          r={r}
+          fill="none"
+          stroke="var(--oracle-brand)"
+          strokeWidth="16"
+          strokeLinecap="round"
+          strokeDasharray={`${runPct * c} ${c}`}
+          transform="rotate(-90 70 70)"
+        />
+        <text x="70" y="66" textAnchor="middle" fontSize="22" fontWeight="600" fill="var(--rw-ink)">
+          {total}
+        </text>
+        <text x="70" y="84" textAnchor="middle" fontSize="11" fill="var(--rw-muted)">
+          实例总量
+        </text>
+      </svg>
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-3 w-3 rounded-sm" style={{ background: 'var(--oracle-brand)' }} />
+          <span className="text-rw-muted">运行中</span>
+          <span className="font-medium text-rw-ink">{running}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-3 w-3 rounded-sm" style={{ background: 'var(--rw-border)' }} />
+          <span className="text-rw-muted">已停止</span>
+          <span className="font-medium text-rw-ink">{stopped}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-const FREQUENT: ResourceRow[] = [
-  { name: '实例', type: '计算', state: '可用', note: '最常访问', to: '/instances' },
-  { name: 'ARM 抢购', type: '计算', state: '可用', note: '最常访问', to: '/grabber' },
-  { name: '容量探测', type: '计算', state: '可用', note: '最常访问', to: '/capacity' },
-  { name: '虚拟云网络', type: '网络', state: '可用', note: '最常访问', to: '/network' },
-]
-
-const RECENT: ResourceRow[] = [
-  { name: '成本与用量', type: '计费', state: '可用', note: '最近访问', to: '/cost' },
-  { name: '账号', type: '管理', state: '可用', note: '最近访问', to: '/accounts' },
-  { name: '设置', type: '管理', state: '可用', note: '最近访问', to: '/settings' },
-  { name: '身份与权限', type: '身份', state: '可用', note: '最近访问', to: '/identity' },
-]
-
-const PINNED: { to: string; label: string; icon: IconName; tag: string }[] = [
-  { to: '/instances', label: '实例', icon: 'compute', tag: '计算' },
-  { to: '/network', label: '虚拟云网络', icon: 'network', tag: '网络' },
-  { to: '/grabber', label: 'ARM 抢购', icon: 'grabber', tag: '计算' },
-]
-
-const RECENT_SERVICES: { to: string; label: string; icon: IconName; tag: string }[] = [
-  { to: '/capacity', label: '容量探测', icon: 'capacity', tag: '计算' },
-  { to: '/cost', label: '成本与用量', icon: 'cost', tag: '计费' },
-  { to: '/identity', label: '身份与权限', icon: 'shield', tag: '身份' },
-]
-
-const WORK_ITEMS: { icon: IconName; cat: string; label: string; to: string; time: string }[] = [
-  { icon: 'compute', cat: '计算', label: '创建实例', to: '/instances', time: '2 分钟' },
-  { icon: 'grabber', cat: '计算', label: '创建 ARM 抢购任务', to: '/grabber', time: '5 分钟' },
-  { icon: 'capacity', cat: '计算', label: '检查机型库存', to: '/capacity', time: '1 分钟' },
-  { icon: 'network', cat: '网络', label: '查看虚拟云网络', to: '/network', time: '3 分钟' },
-]
-
-const WIDGETS: { key: string; label: string }[] = [
-  { key: 'resources', label: '资源' },
-  { key: 'metrics', label: '资源概览' },
-  { key: 'services', label: '服务' },
-  { key: 'center', label: '服务中心区域' },
-]
-
-const STORAGE_KEY = 'oci-manager:home-widgets'
-
-function readWidgets(): Record<string, boolean> {
-  const fallback = Object.fromEntries(WIDGETS.map((w) => [w.key, true]))
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return fallback
-    const parsed = JSON.parse(raw) as Record<string, boolean>
-    return { ...fallback, ...parsed }
-  } catch {
-    return fallback
+function RegionBars({ ranks }: { ranks: { region: string; count: number }[] }) {
+  const max = Math.max(1, ...ranks.map((r) => r.count))
+  if (ranks.length === 0) {
+    return <p className="oci-inline-hint">暂无区域数据。</p>
   }
+  return (
+    <div className="space-y-3">
+      {ranks.slice(0, 6).map((r) => (
+        <div key={r.region} className="flex items-center gap-3 text-sm">
+          <span className="w-32 shrink-0 truncate font-mono text-xs text-rw-muted">{r.region}</span>
+          <div className="h-3 flex-1 overflow-hidden rounded bg-rw-canvas">
+            <div
+              className="h-full rounded bg-oracle-brand"
+              style={{ width: `${(r.count / max) * 100}%` }}
+            />
+          </div>
+          <span className="w-8 shrink-0 text-right font-medium text-rw-ink">{r.count}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export default function Overview() {
-  const { account, region } = useAccount()
   const navigate = useNavigate()
-  const [data, setData] = useState<OverviewData | null>(null)
+  const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
-  const [resourceTab, setResourceTab] = useState<'frequent' | 'recent' | 'metrics'>('frequent')
-  const [widgets, setWidgets] = useState(readWidgets)
-  const [customizeOpen, setCustomizeOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const customizeRef = useRef<HTMLButtonElement>(null)
-
   const refresh = () => setReloadKey((k) => k + 1)
+  const refreshRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    if (!account) return
     let cancelled = false
     setLoading(true)
     setError('')
-    api.cost
-      .overview(account.id, region || undefined)
+    api.dashboard
+      .get()
       .then((res) => {
         if (!cancelled) setData(res)
       })
@@ -108,353 +99,122 @@ export default function Overview() {
     return () => {
       cancelled = true
     }
-  }, [account, region, reloadKey])
+  }, [reloadKey])
 
-  const toggleWidget = (key: string) => {
-    setWidgets((prev) => {
-      const next = { ...prev, [key]: !prev[key] }
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      } catch {
-        /* 隐私模式下 localStorage 不可用，布局仍在本会话生效 */
-      }
-      return next
-    })
-  }
-
-  // 页头「定制」：真实控制四张卡片显隐，设置持久化到本机
   const pageAction = useMemo(
     () => (
-      <>
-        <button
-          ref={customizeRef}
-          type="button"
-          className="oci-btn-secondary"
-          onClick={() => setCustomizeOpen((v) => !v)}
-          aria-haspopup="menu"
-          aria-expanded={customizeOpen}
-        >
-          <Icon name="sliders" size={15} />
-          定制
-        </button>
-        <AnchoredMenu
-          open={customizeOpen}
-          anchorRef={customizeRef}
-          onClose={() => setCustomizeOpen(false)}
-          minWidth={210}
-        >
-          <div className="oci-actions-note">显示在主页的部件</div>
-          {WIDGETS.map((w) => (
-            <label key={w.key} className="oci-actions-item" style={{ cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={widgets[w.key]}
-                onChange={() => toggleWidget(w.key)}
-              />
-              {w.label}
-            </label>
-          ))}
-        </AnchoredMenu>
-      </>
+      <button
+        ref={refreshRef}
+        type="button"
+        className="oci-btn-secondary"
+        onClick={refresh}
+      >
+        <Icon name="refresh" size={15} />
+        刷新
+      </button>
     ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [customizeOpen, widgets],
+    [],
   )
   usePageAction(pageAction)
 
-  if (!account) return null
-
-  const copyTenancy = async () => {
-    try {
-      await navigator.clipboard.writeText(account.tenancy_ocid)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
-    } catch {
-      setCopied(false)
-    }
+  const activityTone = (result: string) => {
+    const r = result.toLowerCase()
+    if (['success', 'ok', 'updated', 'true'].includes(r)) return 'success' as const
+    if (['failed', 'error', 'denied'].includes(r)) return 'danger' as const
+    if (r === 'blocked') return 'warning' as const
+    return 'neutral' as const
   }
-
-  const metricRows: ResourceRow[] = [
-    {
-      name: '实例总数（含已终止）',
-      type: '计算',
-      state: String(data?.instance_count ?? '—'),
-      note: '总数',
-      to: '/instances',
-    },
-    {
-      name: '运行中实例',
-      type: '计算',
-      state: String(data?.running_count ?? '—'),
-      note: '运行中',
-      to: '/instances',
-    },
-    {
-      name: '运行中 OCPU',
-      type: '计算',
-      state: data ? data.total_ocpus.toFixed(1) : '—',
-      note: 'OCPU',
-      to: '/instances',
-    },
-    {
-      name: '运行中内存',
-      type: '计算',
-      state: data ? `${data.total_memory_gbs.toFixed(0)} GB` : '—',
-      note: 'GB',
-      to: '/instances',
-    },
-  ]
-
-  const rows = resourceTab === 'frequent' ? FREQUENT : resourceTab === 'recent' ? RECENT : metricRows
-
-  const dots = (items: CardAction[]) => <CardDots items={items} />
 
   return (
     <div>
       {error && <ErrorBanner message={error} />}
 
-      <div className="oci-home-grid">
-        <div className="oci-home-col">
-          {/* 资源：官网左上是「左侧子导航 + 资源表格 + 底部按钮」的复合卡片 */}
-          {widgets.resources && (
-            <Card title="资源" extra={dots([
-              { label: '刷新数据', onSelect: refresh },
-              { label: '前往实例列表', onSelect: () => navigate('/instances') },
-            ])} bodyClassName="oci-card-body--compact">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
-                <div className="border-r border-oracle-border pr-3">
-                  <div className="oci-home-tabs" style={{ flexDirection: 'column', alignItems: 'stretch', border: 'none', gap: 2 }}>
-                    {([
-                      { key: 'frequent', label: '我最常看的' },
-                      { key: 'recent', label: '最近访问' },
-                      { key: 'metrics', label: '资源集合' },
-                    ] as const).map((t) => (
-                      <button
-                        key={t.key}
-                        type="button"
-                        className={resourceTab === t.key ? 'active' : ''}
-                        onClick={() => setResourceTab(t.key)}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  {loading && !data ? (
-                    <Loading text="正在汇总资源与成本…" />
-                  ) : (
-                    <table className="oci-table">
-                      <thead>
-                        <tr>
-                          <th>名称</th>
-                          <th>类型</th>
-                          <th>状态</th>
-                          <th>说明</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => (
-                          <tr key={r.name}>
-                            <td>
-                              <Link to={r.to} className="oci-link">
-                                {r.name}
-                              </Link>
-                            </td>
-                            <td>{r.type}</td>
-                            <td>
-                              {r.note === '运行中' || r.note === 'OCPU' || r.note === 'GB' ? (
-                                <span>{r.state}</span>
-                              ) : (
-                                <Badge tone="success">{r.state}</Badge>
-                              )}
-                            </td>
-                            <td>{r.note}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  <p className="oci-inline-hint mt-2">共显示 {rows.length} 项。</p>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <button type="button" className="oci-btn-secondary oci-btn-sm" onClick={() => navigate('/instances')}>
-                  资源浏览器
-                </button>
-                <button type="button" className="oci-btn-secondary oci-btn-sm" onClick={refresh}>
-                  <Icon name="refresh" size={14} />
-                  刷新
-                </button>
-              </div>
-            </Card>
-          )}
+      {loading && !data ? (
+        <Loading text="正在聚合所有账号的资源与成本…" />
+      ) : data ? (
+        <>
+          {/* 顶部统计卡片：oci-start 系统资源监控风格的聚合指标 */}
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+            <Stat
+              label="实例总数"
+              value={data.instances_total}
+              accent="brand"
+              hint={`${data.running_count} 运行 / ${data.stopped_count} 停止`}
+            />
+            <Stat label="运行中 OCPU" value={data.total_ocpus.toFixed(1)} hint="跨账号合计" />
+            <Stat label="运行中内存" value={data.total_memory_gbs.toFixed(0)} unit="GB" accent="yellow" />
+            <Stat
+              label="本月费用"
+              value={formatMoney(data.month_cost, data.currency || 'USD')}
+              accent="pine"
+              hint="跨账号合计"
+            />
+            <Stat
+              label="抢购任务"
+              value={data.grab_tasks_total}
+              hint={`${data.grab_tasks_running} 进行中 / ${data.grab_tasks_success} 成功`}
+            />
+            <Stat label="账号数" value={data.accounts_total} accent="pine" />
+          </div>
 
-          {/* 服务：官网左下「固定 / 最近访问」双栏 */}
-          {widgets.services && (
-            <Card title="服务" extra={dots([
-              { label: '打开全局服务菜单', onSelect: () => navigate('/') },
-              { label: '刷新数据', onSelect: refresh },
-            ])}>
-              <div className="oci-service-list">
-                <div>
-                  <div className="oci-label mb-1">固定</div>
-                  {PINNED.map((s) => (
-                    <Link key={s.to} to={s.to} className="oci-service-row">
-                      <Icon name="pin" size={13} />
-                      <span className="oci-link flex-1">{s.label}</span>
-                      <span className="text-xs text-oracle-muted">{s.tag}</span>
-                    </Link>
-                  ))}
-                </div>
-                <div>
-                  <div className="oci-label mb-1">最近访问</div>
-                  {RECENT_SERVICES.map((s) => (
-                    <Link key={s.to} to={s.to} className="oci-service-row">
-                      <Icon name={s.icon} size={13} />
-                      <span className="oci-link flex-1">{s.label}</span>
-                      <span className="text-xs text-oracle-muted">{s.tag}</span>
-                    </Link>
-                  ))}
-                </div>
+          {data.errors.length > 0 && (
+            <div className="oci-status-strip is-warning mt-4">
+              <Icon name="warning" size={16} />
+              <div className="oci-status-main">
+                {data.errors.slice(0, 3).map((e) => (
+                  <span key={e}>{e}</span>
+                ))}
               </div>
-            </Card>
-          )}
-        </div>
-
-        <div className="oci-home-col">
-          {/* 资源概览：五个指标，口径标注明确，避免「总数 / 数量」误读 */}
-          {widgets.metrics && (
-            <Card title="资源概览" extra={dots([
-              { label: '查看成本明细', onSelect: () => navigate('/cost') },
-              { label: '刷新数据', onSelect: refresh },
-            ])} bodyClassName="oci-card-body--compact">
-              <div className="grid grid-cols-2 gap-4">
-                <Stat label="实例总数（含已终止）" value={data?.instance_count ?? '—'} accent="brand" />
-                <Stat label="运行中实例" value={data?.running_count ?? '—'} accent="pine" />
-                <Stat label="运行中 OCPU" value={data ? data.total_ocpus.toFixed(1) : '—'} />
-                <Stat label="运行中内存" value={data ? data.total_memory_gbs.toFixed(0) : '—'} unit="GB" accent="yellow" />
-              </div>
-              <div className="mt-4 border-t border-oracle-border pt-3">
-                <p className="oci-stat-label">预计账单 · 本账期 · {data?.currency || 'USD'}</p>
-                <p className="mt-1 text-[26px] font-bold leading-8 text-oracle-ink">
-                  {data ? formatMoney(data.month_cost, data.currency) : '—'}
-                </p>
-                <Link to="/cost" className="oci-link mt-2 inline-block text-sm">
-                  查看成本详细信息
-                </Link>
-              </div>
-            </Card>
-          )}
-
-          {/* 工作版本：官网右上的步骤列表 */}
-          <Card title="工作版本" extra={dots([
-            { label: '前往实例', onSelect: () => navigate('/instances') },
-            { label: '前往抢购', onSelect: () => navigate('/grabber') },
-          ])}>
-            <div className="oci-step-list">
-              {WORK_ITEMS.map((w) => (
-                <div className="oci-step" key={w.label}>
-                  <Icon name={w.icon} size={16} />
-                  <div className="oci-step-main">
-                    <div className="oci-step-cat">{w.cat}</div>
-                    <Link to={w.to} className="oci-link">{w.label}</Link>
-                  </div>
-                  <span className="oci-step-time">{w.time}</span>
-                </div>
-              ))}
             </div>
-            <button type="button" className="oci-btn-secondary oci-btn-sm mt-3" onClick={() => navigate('/instances')}>
-              全部显示
-            </button>
-          </Card>
-
-          {/* 服务中心区域：官网右下的建议卡片 */}
-          {widgets.center && (
-            <Card title="服务中心区域" extra={dots([
-              { label: '查看服务健康状况', onSelect: () => navigate('/settings') },
-            ])}>
-              <p className="oci-inline-hint mb-3">
-                通过选择概要信息来定制建议。
-                <span className="oci-link ml-1">更新</span>
-              </p>
-              <ul className="space-y-3">
-                <li className="flex items-start gap-3">
-                  <Icon name="shield" size={16} />
-                  <div>
-                    <div className="oci-step-cat">身份</div>
-                    <Link to="/identity" className="oci-link text-sm">检查 IAM 用户与组成员</Link>
-                  </div>
-                </li>
-                <li className="flex items-start gap-3">
-                  <Icon name="key" size={16} />
-                  <div>
-                    <div className="oci-step-cat">安全</div>
-                    <Link to="/settings" className="oci-link text-sm">配置两步验证与 HTTPS 证书</Link>
-                  </div>
-                </li>
-                <li className="flex items-start gap-3">
-                  <Icon name="capacity" size={16} />
-                  <div>
-                    <div className="oci-step-cat">计算</div>
-                    <Link to="/capacity" className="oci-link text-sm">查询 Ampere A1 机型余量</Link>
-                  </div>
-                </li>
-              </ul>
-            </Card>
           )}
-        </div>
-      </div>
 
-      {/* 账户信息：OCID 省略展示 + 一键复制，不再平铺完整字符串 */}
-      <Card
-        title="账户信息"
-        className="mt-4"
-        extra={dots([
-          { label: '前往账号设置', onSelect: () => navigate('/accounts') },
-          { label: '刷新数据', onSelect: refresh },
-        ])}
-      >
-        <div className="grid grid-cols-1 gap-x-10 gap-y-0 sm:grid-cols-2">
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">账号名称</div>
-            <div className="oci-kv-value">{account.name}</div>
-          </div>
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">当前区域</div>
-            <div className="oci-kv-value">{data?.region ?? account.region}</div>
-          </div>
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">租户 OCID</div>
-            <div className="oci-kv-value">
-              <span className="oci-ocid" title={account.tenancy_ocid}>
-                …{account.tenancy_ocid.slice(-24)}
-              </span>
-              <button type="button" className="oci-copy-btn" onClick={() => void copyTenancy()}>
-                {copied ? '已复制' : '复制'}
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card title="实例分布">
+              <Donut running={data.running_count} stopped={data.stopped_count} />
+            </Card>
+            <Card title="区域资源排行" extra={
+              <button type="button" className="oci-link text-sm" onClick={() => navigate('/instances')}>
+                查看实例
               </button>
-            </div>
+            }>
+              <RegionBars ranks={data.region_ranking} />
+            </Card>
           </div>
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">出口代理</div>
-            <div className="oci-kv-value">{account.proxy_url ? '已配置专属代理' : '直连'}</div>
-          </div>
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">区间数量</div>
-            <div className="oci-kv-value">{data?.compartment_count ?? '—'}</div>
-          </div>
-          <div className="oci-kv-row">
-            <div className="oci-kv-label">同步时间</div>
-            <div className="oci-kv-value">{formatDateTime(new Date().toISOString())}</div>
-          </div>
-        </div>
-        {data?.compartment_error && (
-          <p className="oci-error-text mt-3">区间列表读取失败：{data.compartment_error}</p>
-        )}
-        {data?.cost_error && (
-          <p className="oci-error-text mt-3">成本数据读取失败：{data.cost_error}</p>
-        )}
-      </Card>
+
+          <Card
+            title="最近活动"
+            className="mt-4"
+            extra={
+              <Link to="/settings" className="oci-link text-sm">
+                审计日志
+              </Link>
+            }
+            bodyClassName="oci-card-body--compact"
+          >
+            {data.activities.length === 0 ? (
+              <p className="oci-inline-hint">暂无活动记录。</p>
+            ) : (
+              <ul className="divide-y divide-oracle-border">
+                {data.activities.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3 py-2.5 text-sm">
+                    <Badge tone={activityTone(a.result)}>{a.result_label || a.result}</Badge>
+                    <span className="w-28 shrink-0 truncate text-rw-muted">
+                      {a.account || '面板'}
+                    </span>
+                    <span className="flex-1 truncate">
+                      {a.category_label || a.category} · {a.operation_label || a.operation}
+                      {a.target ? `（${a.target}）` : ''}
+                    </span>
+                    <span className="shrink-0 text-xs text-rw-muted">
+                      {formatDateTime(a.created_at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </>
+      ) : null}
     </div>
   )
 }

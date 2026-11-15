@@ -240,72 +240,30 @@ func (s *Server) overview(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
 	defer cancel()
 
-	account, cs, ok := s.accountAndClients(c)
+	account, _, ok := s.accountAndClients(c)
 	if !ok {
 		return
 	}
 
-	result := gin.H{
-		"account_id": account.ID,
-		"region":     cs.Region,
-	}
-
-	compartments, err := oci.ListCompartments(ctx, cs, account.TenancyOCID)
+	ov, err := s.accountOverview(ctx, account)
 	if err != nil {
-		result["compartment_error"] = err.Error()
-		compartments = nil
+		respondError(c, err)
+		return
 	}
-
-	instances := make([]oci.Instance, 0)
-	for _, comp := range compartments {
-		list, err := oci.ListInstances(ctx, cs, comp.ID)
-		if err != nil {
-			continue
-		}
-		instances = append(instances, list...)
-	}
-
-	running := 0
-	totalOCPUs := float32(0)
-	totalMemory := float32(0)
-	for _, inst := range instances {
-		if inst.State == "RUNNING" {
-			running++
-			totalOCPUs += inst.OCPUs
-			totalMemory += inst.MemoryGBs
-		}
-	}
-
-	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
-	points, costErr := oci.QueryCost(ctx, cs, oci.UsageQuery{
-		TenancyID:   account.TenancyOCID,
-		Start:       monthStart,
-		End:         time.Now().UTC(),
-		Granularity: "monthly",
-		GroupBy:     []string{"service"},
+	respondOK(c, gin.H{
+		"account_id":        ov.accountID,
+		"region":            ov.region,
+		"tenancy_ocid":      ov.tenancyOCID,
+		"compartment_count": ov.compartmentCount,
+		"instance_count":    ov.instanceCount,
+		"running_count":     ov.runningCount,
+		"total_ocpus":       ov.totalOCPUs,
+		"total_memory_gbs":  ov.totalMemoryGBs,
+		"month_cost":        ov.monthCost,
+		"currency":          ov.currency,
+		"compartment_error": ov.compartmentError,
+		"cost_error":        ov.costError,
 	})
-	var monthCost float32
-	currency := ""
-	if costErr == nil {
-		for _, p := range points {
-			monthCost += p.Cost
-			if p.Currency != "" {
-				currency = p.Currency
-			}
-		}
-	} else {
-		result["cost_error"] = costErr.Error()
-	}
-
-	result["tenancy_ocid"] = account.TenancyOCID
-	result["compartment_count"] = len(compartments)
-	result["instance_count"] = len(instances)
-	result["running_count"] = running
-	result["total_ocpus"] = totalOCPUs
-	result["total_memory_gbs"] = totalMemory
-	result["month_cost"] = monthCost
-	result["currency"] = currency
-	respondOK(c, result)
 }
 
 // parseRange 解析查询区间，缺失时默认返回最近 30 天。

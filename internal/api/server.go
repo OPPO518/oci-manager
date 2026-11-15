@@ -134,6 +134,20 @@ func (s *Server) registerRoutes() {
 		api.POST("/grab-tasks/:id/stop", s.stopGrabTask)
 		api.GET("/grab-tasks/:id/logs", s.grabTaskLogs)
 
+		// 主页多账号聚合仪表盘
+		api.GET("/dashboard", s.dashboard)
+
+		// 定时开关机任务
+		api.GET("/power-tasks", s.listPowerTasks)
+		api.POST("/power-tasks", s.createPowerTask)
+		api.GET("/power-tasks/:id", s.getPowerTask)
+		api.PUT("/power-tasks/:id", s.updatePowerTask)
+		api.DELETE("/power-tasks/:id", s.deletePowerTask)
+		api.POST("/power-tasks/:id/toggle", s.togglePowerTask)
+
+		// 实时日志流（SSE）
+		api.GET("/logs/stream", s.logStream)
+
 		// 演示模式、通用验证码、审计日志与保护策略
 		api.GET("/settings/demo", s.getDemo)
 		api.PUT("/settings/demo", s.saveDemo)

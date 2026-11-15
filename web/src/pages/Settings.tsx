@@ -78,6 +78,10 @@ const OPERATION_LABEL: Record<string, string> = {
   update_vnic: '更新 VNIC',
   update_security_list: '更新安全列表',
   rotate_public_ip: '更换公网 IP',
+  power_task_create: '创建定时任务',
+  power_task_update: '更新定时任务',
+  power_task_delete: '删除定时任务',
+  power_task_toggle: '启用/停用定时任务',
 }
 
 function humanOperation(op: string) {

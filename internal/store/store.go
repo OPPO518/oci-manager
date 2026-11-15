@@ -126,6 +126,26 @@ func (s *Store) migrate() error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_grab_task_logs_task ON grab_task_logs(task_id, id);`,
 
+		// 定时开关机任务。enabled=0 的任务不参与调度；last_run 为最近一次触发时间。
+		`CREATE TABLE IF NOT EXISTS power_tasks (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+			display_name    TEXT NOT NULL,
+			action          TEXT NOT NULL DEFAULT 'start',
+			target_mode     TEXT NOT NULL DEFAULT 'all',
+			instance_ids    TEXT NOT NULL DEFAULT '',
+			compartment_id  TEXT NOT NULL DEFAULT '',
+			days_of_week    TEXT NOT NULL DEFAULT '*',
+			hour            INTEGER NOT NULL DEFAULT 0,
+			minute          INTEGER NOT NULL DEFAULT 0,
+			enabled         INTEGER NOT NULL DEFAULT 1,
+			last_run        DATETIME,
+			last_result     TEXT NOT NULL DEFAULT '',
+			created_at      DATETIME NOT NULL,
+			updated_at      DATETIME NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_power_tasks_account ON power_tasks(account_id);`,
+
 		// 键值形式的运行时设置。敏感项（如 Telegram Bot Token）由 Sealer 加密后存放。
 		`CREATE TABLE IF NOT EXISTS settings (
 			key        TEXT PRIMARY KEY,

@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"time"
+
+	"github.com/yourname/oci-manager/internal/logbus"
 )
 
 // AuditLog 是一条敏感操作记录。表只追加，接口层不提供删除。
@@ -32,6 +34,32 @@ func (s *Store) AppendAudit(category, operation, target, result, detail, account
 	if err != nil {
 		fmt.Printf("写入审计日志失败: %v\n", err)
 	}
+
+	// 实时日志流：审计事件同步推送到日志总线。
+	var level logbus.Level
+	switch result {
+	case "success", "ok", "updated", "true":
+		level = logbus.LevelSuccess
+	case "failed", "error", "denied":
+		level = logbus.LevelError
+	case "blocked":
+		level = logbus.LevelWarn
+	default:
+		level = logbus.LevelInfo
+	}
+	msg := fmt.Sprintf("[%s] %s %s%s",
+		AuditCategoryLabel(category), AuditOperationLabel(operation), target, detailSuffix(detail))
+	logbus.Default.Publish(level, logbus.SourceAudit, accountID, msg)
+}
+
+func detailSuffix(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	if len(detail) > 120 {
+		detail = detail[:120] + "…"
+	}
+	return " — " + detail
 }
 
 // ListAuditLogs 返回最近的审计记录，按时间倒序。limit 由调用方钳制。

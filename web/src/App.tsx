@@ -12,8 +12,10 @@ import Grabber from './pages/Grabber'
 import Identity from './pages/Identity'
 import Instances from './pages/Instances'
 import Login from './pages/Login'
+import Logs from './pages/Logs'
 import Network from './pages/Network'
 import Overview from './pages/Overview'
+import PowerTasks from './pages/PowerTasks'
 import Settings from './pages/Settings'
 
 /** 未登录时只渲染登录页，避免 AccountProvider 发出无谓的 401 请求 */
@@ -46,11 +48,13 @@ function Shell() {
             <Route path="/instances" element={<Instances />} />
             <Route path="/grabber" element={<Grabber />} />
             <Route path="/capacity" element={<Capacity />} />
+            <Route path="/power-tasks" element={<PowerTasks />} />
             <Route path="/cost" element={<Cost />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/network" element={<Network />} />
             <Route path="/identity" element={<Identity />} />
+            <Route path="/logs" element={<Logs />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         </Layout>

@@ -7,6 +7,7 @@ import type {
   CapacityQueryInput,
   CapacityResponse,
   Compartment,
+  Dashboard,
   DemoSettings,
   GrabTask,
   GrabTaskInput,
@@ -26,6 +27,8 @@ import type {
   OtpPayload,
   OtpRequestResult,
   Overview,
+  PowerTask,
+  PowerTaskInput,
   PublicIp,
   Region,
   RotateIpResult,
@@ -197,8 +200,8 @@ export const api = {
   },
 
   instances: {
-    list: (accountId: string, params: { region?: string; compartment_id?: string }) =>
-      request<Instance[]>(`/accounts/${accountId}/instances${query(params)}`),
+    list: (accountId: string, params?: { region?: string; compartment_id?: string }) =>
+      request<Instance[]>(`/accounts/${accountId}/instances${query(params ?? {})}`),
     action: (accountId: string, instanceId: string, action: string, region?: string) =>
       request<{ status: string }>(
         `/accounts/${accountId}/instances/${instanceId}/action${query({ region })}`,
@@ -247,6 +250,13 @@ export const api = {
       request<Overview>(`/accounts/${accountId}/overview${query({ region })}`),
   },
 
+  /* ----------------------------------------------------------------
+     主页多账号聚合仪表盘
+     ---------------------------------------------------------------- */
+  dashboard: {
+    get: () => request<Dashboard>('/dashboard'),
+  },
+
   grabTasks: {
     list: (accountId?: string) => request<GrabTask[]>(`/grab-tasks${query({ account_id: accountId })}`),
     get: (id: string) => request<GrabTask>(`/grab-tasks/${id}`),
@@ -259,6 +269,33 @@ export const api = {
       request<GrabTaskLog[]>(
         `/grab-tasks/${id}/logs${query({ after: after?.toString(), limit: limit?.toString() })}`,
       ),
+  },
+
+  /* ----------------------------------------------------------------
+     定时开关机任务
+     ---------------------------------------------------------------- */
+  powerTasks: {
+    list: (accountId?: string) =>
+      request<PowerTask[]>(`/power-tasks${query({ account_id: accountId })}`),
+    get: (id: string) => request<PowerTask>(`/power-tasks/${id}`),
+    create: (body: PowerTaskInput) =>
+      request<PowerTask>('/power-tasks', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: PowerTaskInput) =>
+      request<PowerTask>(`/power-tasks/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    remove: (id: string) => request<void>(`/power-tasks/${id}`, { method: 'DELETE' }),
+    toggle: (id: string, enabled: boolean) =>
+      request<PowerTask>(`/power-tasks/${id}/toggle`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
+  },
+
+  /* ----------------------------------------------------------------
+     实时日志流（SSE）。直接返回带 /api 前缀的完整 URL，供 EventSource 订阅。
+     ---------------------------------------------------------------- */
+  logs: {
+    streamUrl: (params?: { source?: string; level?: string }) =>
+      `${BASE}/logs/stream${query(params as Record<string, string | undefined>)}`,
   },
 
   /* ----------------------------------------------------------------

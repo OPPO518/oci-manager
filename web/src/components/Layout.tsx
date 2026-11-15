@@ -53,6 +53,7 @@ const COMPUTE_NAV: ServiceNav = {
       items: [
         { label: 'ARM 抢购', to: '/grabber' },
         { label: '容量探测', to: '/capacity' },
+        { label: '开机任务', to: '/power-tasks', icon: 'power' },
       ],
     },
     {
@@ -126,6 +127,7 @@ const ADMIN_NAV: ServiceNav = {
       items: [
         { label: '账号', to: '/accounts' },
         { label: '设置', to: '/settings' },
+        { label: '日志查看', to: '/logs', icon: 'logs' },
       ],
     },
     {
@@ -142,11 +144,13 @@ const SERVICE_NAV: Record<string, ServiceNav> = {
   '/instances': COMPUTE_NAV,
   '/grabber': COMPUTE_NAV,
   '/capacity': COMPUTE_NAV,
+  '/power-tasks': COMPUTE_NAV,
   '/network': NETWORK_NAV,
   '/cost': BILLING_NAV,
   '/identity': IDENTITY_NAV,
   '/accounts': ADMIN_NAV,
   '/settings': ADMIN_NAV,
+  '/logs': ADMIN_NAV,
 }
 
 type PageMeta = {
@@ -204,6 +208,16 @@ const PAGE_META: Record<string, PageMeta> = {
     lead: '身份与安全',
     desc: '管理 IAM 用户、组、成员关系与 API Key；所有写操作均需二次验证。',
   },
+  '/power-tasks': {
+    title: '开机任务',
+    lead: '定时开关机',
+    desc: '按计划自动启动、停止或重启实例，支持按周重复与多实例批量执行。',
+  },
+  '/logs': {
+    title: '日志查看',
+    lead: '实时日志流',
+    desc: '汇聚管理面板运行、抢购任务与敏感操作的实时日志，便于排障与审计。',
+  },
 }
 
 // 这些页面即使还没有账号也必须可用，否则无法完成初始配置
@@ -215,22 +229,24 @@ const ALL_SERVICES: NavLinkItem[] = [
   { to: '/instances', label: '实例', icon: 'compute' },
   { to: '/grabber', label: 'ARM 抢购', icon: 'grabber' },
   { to: '/capacity', label: '容量探测', icon: 'capacity' },
+  { to: '/power-tasks', label: '开机任务', icon: 'power' },
   { to: '/cost', label: '成本与用量', icon: 'cost' },
   { to: '/network', label: '虚拟云网络', icon: 'network' },
   { to: '/identity', label: '身份与权限', icon: 'shield' },
   { to: '/accounts', label: '账号', icon: 'accounts' },
   { to: '/settings', label: '设置', icon: 'settings' },
+  { to: '/logs', label: '日志查看', icon: 'logs' },
 ]
 
 const PINNED = [ALL_SERVICES[0], ALL_SERVICES[1]]
-const RECENT = [ALL_SERVICES[4], ALL_SERVICES[7], ALL_SERVICES[3]]
+const RECENT = [ALL_SERVICES[5], ALL_SERVICES[8], ALL_SERVICES[3]]
 
 const TRAY_GROUPS: { group: string; icon: IconName; items: NavLinkItem[] }[] = [
-  { group: '计算', icon: 'compute', items: ALL_SERVICES.slice(1, 4) },
-  { group: '网络与存储', icon: 'network', items: [ALL_SERVICES[5]] },
-  { group: '计费和成本管理', icon: 'cost', items: [ALL_SERVICES[4]] },
-  { group: '身份和安全', icon: 'shield', items: [ALL_SERVICES[6]] },
-  { group: '管理', icon: 'settings', items: [ALL_SERVICES[7], ALL_SERVICES[8]] },
+  { group: '计算', icon: 'compute', items: ALL_SERVICES.slice(1, 5) },
+  { group: '网络与存储', icon: 'network', items: [ALL_SERVICES[6]] },
+  { group: '计费和成本管理', icon: 'cost', items: [ALL_SERVICES[5]] },
+  { group: '身份和安全', icon: 'shield', items: [ALL_SERVICES[7]] },
+  { group: '管理', icon: 'settings', items: [ALL_SERVICES[8], ALL_SERVICES[9], ALL_SERVICES[10]] },
 ]
 
 export function Layout({ children }: { children: ReactNode }) {

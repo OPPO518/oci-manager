@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yourname/oci-manager/internal/logbus"
 	"github.com/yourname/oci-manager/internal/oci"
 	"github.com/yourname/oci-manager/internal/store"
 )
@@ -209,6 +210,8 @@ func (m *Manager) Start(taskID string) error {
 	}
 	_ = m.store.AppendLog(taskID, "info", fmt.Sprintf("任务启动：%s / %s / %d OCPU / %d GB 内存（轮询间隔 %d 秒）",
 		task.Shape, task.ADName, task.OCPUs, task.MemoryGBs, taskIntervalSec(task)))
+	logbus.Default.Publish(logbus.LevelInfo, logbus.SourceGrabber, task.AccountID,
+		fmt.Sprintf("抢购任务「%s」已启动：%s / %s / %d OCPU", task.DisplayName, task.Shape, task.ADName, task.OCPUs))
 
 	go func() {
 		defer func() {
@@ -235,6 +238,10 @@ func (m *Manager) Stop(taskID string) error {
 	handle.cancel()
 	_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusStopped, "任务已停止")
 	_ = m.store.AppendLog(taskID, "info", "收到停止指令")
+	if t, err := m.store.GetGrabTask(taskID); err == nil {
+		logbus.Default.Publish(logbus.LevelInfo, logbus.SourceGrabber, t.AccountID,
+			fmt.Sprintf("抢购任务「%s」已停止", t.DisplayName))
+	}
 	return nil
 }
 
@@ -317,6 +324,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 				fmt.Sprintf("抢购成功，实例 ID：%v", created))
 			m.notifyGrab("🎉 ARM 抢购成功\n\n" + taskSummary(task) +
 				fmt.Sprintf("\n实例 ID：%s\n第 %d 次尝试", strings.Join(created, "\n"), attempt))
+			logbus.Default.Publish(logbus.LevelSuccess, logbus.SourceGrabber, task.AccountID,
+				fmt.Sprintf("抢购任务「%s」成功创建 %d 台实例（第 %d 次尝试）", task.DisplayName, len(created), attempt))
 			return
 		}
 
@@ -337,6 +346,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 			_, _ = m.store.RecordAttempt(taskID, false, launchErr.Error(), nil)
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed, launchErr.Error())
 			_ = m.store.AppendLog(taskID, "error", "创建失败："+launchErr.Error())
+			logbus.Default.Publish(logbus.LevelError, logbus.SourceGrabber, task.AccountID,
+				fmt.Sprintf("抢购任务「%s」失败终止：%s", task.DisplayName, launchErr.Error()))
 			m.notifyGrab("❌ 抢购任务已终止\n\n" + taskSummary(task) +
 				"\n原因：" + launchErr.Error())
 			return
@@ -348,6 +359,8 @@ func (m *Manager) loop(ctx context.Context, taskID string) {
 		if task.MaxAttempts > 0 && attempt >= task.MaxAttempts {
 			_ = m.store.UpdateGrabTaskStatus(taskID, store.StatusFailed,
 				fmt.Sprintf("已达最大尝试次数 %d，仍未抢到资源", task.MaxAttempts))
+			logbus.Default.Publish(logbus.LevelWarn, logbus.SourceGrabber, task.AccountID,
+				fmt.Sprintf("抢购任务「%s」已达最大尝试次数 %d，结束", task.DisplayName, task.MaxAttempts))
 			m.notifyGrab("⏹ 抢购任务已结束\n\n" + taskSummary(task) +
 				fmt.Sprintf("\n已达最大尝试次数 %d，仍未抢到资源", task.MaxAttempts))
 			return

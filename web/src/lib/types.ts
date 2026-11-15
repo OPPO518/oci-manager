@@ -147,6 +147,35 @@ export interface Overview {
   cost_error?: string
 }
 
+/** 主页多账号聚合仪表盘 */
+export interface Dashboard {
+  accounts_total: number
+  instances_total: number
+  running_count: number
+  stopped_count: number
+  total_ocpus: number
+  total_memory_gbs: number
+  month_cost: number
+  currency: string
+  grab_tasks_total: number
+  grab_tasks_running: number
+  grab_tasks_success: number
+  region_ranking: { region: string; count: number }[]
+  activities: {
+    id: number
+    created_at: string
+    account: string
+    category: string
+    operation: string
+    result: string
+    target: string
+    category_label: string
+    operation_label: string
+    result_label: string
+  }[]
+  errors: string[]
+}
+
 export interface TestResult {
   tenancy_name: string
   region: string
@@ -338,6 +367,59 @@ export interface InstanceDetail {
   public_ips: PublicIp[]
   security_lists: SecurityList[]
 }
+
+/* ------------------------------------------------------------------
+   定时开关机任务
+   ------------------------------------------------------------------ */
+export type PowerAction = 'start' | 'stop' | 'reset'
+export type PowerTargetMode = 'all' | 'selected'
+
+export interface PowerTask {
+  id: number
+  account_id: string
+  display_name: string
+  action: PowerAction
+  target_mode: PowerTargetMode
+  instance_ids: string
+  compartment_id: string
+  days_of_week: string
+  hour: number
+  minute: number
+  enabled: boolean
+  last_run: string | null
+  last_result: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PowerTaskInput {
+  account_id: string
+  display_name: string
+  action: PowerAction
+  target_mode: PowerTargetMode
+  instance_ids?: string[]
+  compartment_id?: string
+  days_of_week?: number[]
+  hour: number
+  minute: number
+  enabled: boolean
+}
+
+/* ------------------------------------------------------------------
+   实时日志流（SSE）
+   ------------------------------------------------------------------ */
+export type LogLevel = 'info' | 'warn' | 'error' | 'success'
+export type LogSource = 'startup' | 'scheduler' | 'grabber' | 'audit' | 'system'
+
+export interface LogEntry {
+  id: number
+  timestamp: string
+  level: LogLevel
+  source: LogSource
+  account: string
+  message: string
+}
+
 
 /* ------------------------------------------------------------------
    公网 IP 更换护栏
