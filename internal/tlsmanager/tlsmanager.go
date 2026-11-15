@@ -12,7 +12,6 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
@@ -131,12 +130,10 @@ func (m *Manager) readCert() (*tls.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 解析叶子证书以取得域名与过期时间。
-	block, _ := pem.Decode(pair.Certificate[0])
-	if block == nil {
-		return nil, errors.New("证书 PEM 解析失败")
-	}
-	leaf, err := x509.ParseCertificate(block.Bytes)
+	// tls.LoadX509KeyPair 已将 PEM 解析为 DER，pair.Certificate[0] 是叶子证书
+	// 的 DER 字节（不是 PEM），必须用 x509.ParseCertificate 直接解析；若对其
+	// 再调用 pem.Decode 会因无法识别 PEM 结构而返回 nil，误报"证书 PEM 解析失败"。
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
 		return nil, fmt.Errorf("解析证书失败: %w", err)
 	}
