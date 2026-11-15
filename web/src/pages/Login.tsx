@@ -53,6 +53,26 @@ function AuthCard({
   )
 }
 
+// 左侧黑栏的点阵球装饰：纯 DOM 圆点模拟点阵地球，不用任何图片素材。
+// 距中心越近越亮，四角点缀 Oracle 红，营造科技感而不喧宾夺主。
+const GLOBE_DOTS = (() => {
+  const n = 9
+  const c = (n - 1) / 2
+  const accents = new Set(['2,2', '6,2', '2,6', '6,6'])
+  const dots: { op: string; accent: boolean }[] = []
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = x - c
+      const dy = y - c
+      const d = Math.sqrt(dx * dx + dy * dy)
+      if (d > c + 0.35) continue
+      const t = 1 - d / (c + 0.35)
+      dots.push({ op: (0.22 + 0.78 * t).toFixed(2), accent: accents.has(`${x},${y}`) })
+    }
+  }
+  return dots
+})()
+
 export default function Login() {
   const { status, setup, login, verifyOtp, pendingChallenge, expire } = useAuth()
   const [username, setUsername] = useState('')
@@ -62,6 +82,8 @@ export default function Login() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [showMethods, setShowMethods] = useState(false)
+  const [showPass, setShowPass] = useState(false)
+  const [remember, setRemember] = useState(false)
 
   const needSetup = !status?.initialized
 
@@ -89,7 +111,7 @@ export default function Login() {
     setError('')
     setBusy(true)
     try {
-      await login(username, password)
+      await login(username, password, remember)
       setPassword('')
     } catch (err) {
       setError((err as Error).message)
@@ -114,24 +136,45 @@ export default function Login() {
 
   return (
     <div className="oci-login-shell">
-      {/* 左：品牌区 */}
+      {/* 顶栏右上控件：语言 / 主题（深浅色系统尚未实现，先放占位） */}
+      <div className="oci-login-topbar">
+        <button type="button" className="oci-login-topbtn" title="多语言即将推出" aria-label="切换语言">
+          <Icon name="globe" size={16} />
+        </button>
+        <button type="button" className="oci-login-topbtn" title="深色模式即将推出" aria-label="切换主题">
+          <Icon name="moon" size={16} />
+        </button>
+      </div>
+
+      {/* 左：品牌区（占窗口 1/3） */}
       <div className="oci-login-brand">
-        <span className="oci-wordmark">ORACLE</span>
-        <div>
+        <div className="oci-login-brand-top">
+          <span className="oci-wordmark">ORACLE</span>
           <div className="oci-login-brand-tagline">Oracle Cloud Infrastructure</div>
-          <p className="oci-login-brand-copy mt-4">
+        </div>
+        <div className="oci-login-brand-globe" aria-hidden="true">
+          {GLOBE_DOTS.map((d, i) => (
+            <span
+              key={i}
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background: d.accent ? '#c74634' : `rgba(255,255,255,${d.op})`,
+              }}
+            />
+          ))}
+        </div>
+        <div className="oci-login-brand-bottom">
+          <p className="oci-login-brand-copy">
             在一个控制台中管理计算实例、容量探测、抢购任务与成本用量。
-            <br />
             以 Oracle Redwood 设计语言构建，安全、清晰地掌控你的云资源。
           </p>
-        </div>
-        <div className="flex items-center gap-3 text-[13px] text-white/60">
-          <span className="inline-block h-1 w-8 rounded bg-oracle-brand" />
-          <span>OCI 管理器 · 自托管面板</span>
+          <div className="oci-login-brand-stat">管理多个 OCI 账号 · 免费 ARM 抢购一体</div>
         </div>
       </div>
 
-      {/* 右：认证卡 */}
+      {/* 右：认证卡（占窗口 2/3） */}
       <div className="oci-login-panel">
         <div className="oci-login-form">
           {error && (
@@ -153,17 +196,22 @@ export default function Login() {
               <form onSubmit={submitOtp} className="oci-auth-form">
                 <div className="oci-auth-field">
                   <label htmlFor="otp-code">Telegram 验证码</label>
-                  <input
-                    id="otp-code"
-                    className="oci-input text-center font-mono text-lg tracking-[0.5em]"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="000000"
-                    maxLength={6}
-                    autoFocus
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="key" size={16} />
+                    </span>
+                    <input
+                      id="otp-code"
+                      className="oci-input oci-input-has-icon text-center font-mono text-lg tracking-[0.5em]"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="000000"
+                      maxLength={6}
+                      autoFocus
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                    />
+                  </div>
                   <span className="oci-inline-hint">
                     {status?.login_otp
                       ? '验证码已推送到 Telegram，5 分钟内有效。'
@@ -221,38 +269,69 @@ export default function Login() {
               <form onSubmit={submitSetup} className="oci-auth-form">
                 <div className="oci-auth-field">
                   <label htmlFor="setup-user">用户名</label>
-                  <input
-                    id="setup-user"
-                    className="oci-input"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    autoFocus
-                    autoComplete="username"
-                    placeholder="3–32 个字符"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="user" size={16} />
+                    </span>
+                    <input
+                      id="setup-user"
+                      className="oci-input oci-input-has-icon"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      autoFocus
+                      autoComplete="username"
+                      placeholder="3–32 个字符"
+                    />
+                  </div>
                 </div>
                 <div className="oci-auth-field">
                   <label htmlFor="setup-pass">密码</label>
-                  <input
-                    id="setup-pass"
-                    type="password"
-                    className="oci-input"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    placeholder="至少 8 位"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="lock" size={16} />
+                    </span>
+                    <input
+                      id="setup-pass"
+                      type={showPass ? 'text' : 'password'}
+                      className="oci-input oci-input-has-icon oci-input-has-eye"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      placeholder="至少 8 位"
+                    />
+                    <button
+                      type="button"
+                      className="oci-input-eye"
+                      onClick={() => setShowPass((v) => !v)}
+                      aria-label={showPass ? '隐藏密码' : '显示密码'}
+                    >
+                      <Icon name={showPass ? 'eye-off' : 'eye'} size={16} />
+                    </button>
+                  </div>
                 </div>
                 <div className="oci-auth-field">
                   <label htmlFor="setup-confirm">确认密码</label>
-                  <input
-                    id="setup-confirm"
-                    type="password"
-                    className="oci-input"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    autoComplete="new-password"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="lock" size={16} />
+                    </span>
+                    <input
+                      id="setup-confirm"
+                      type={showPass ? 'text' : 'password'}
+                      className="oci-input oci-input-has-icon oci-input-has-eye"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="oci-input-eye"
+                      onClick={() => setShowPass((v) => !v)}
+                      aria-label={showPass ? '隐藏密码' : '显示密码'}
+                    >
+                      <Icon name={showPass ? 'eye-off' : 'eye'} size={16} />
+                    </button>
+                  </div>
                 </div>
                 <button type="submit" className="oci-auth-submit" disabled={busy || !username || !password}>
                   {busy ? '创建中…' : '创建账号'}
@@ -265,34 +344,65 @@ export default function Login() {
               <form onSubmit={submitLogin} className="oci-auth-form">
                 <div className="oci-auth-field">
                   <label htmlFor="login-user">用户名</label>
-                  <input
-                    id="login-user"
-                    className="oci-input"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="/用户名"
-                    autoFocus
-                    autoComplete="username"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="user" size={16} />
+                    </span>
+                    <input
+                      id="login-user"
+                      className="oci-input oci-input-has-icon"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="/用户名"
+                      autoFocus
+                      autoComplete="username"
+                    />
+                  </div>
                 </div>
                 <div className="oci-auth-field">
                   <label htmlFor="login-pass">密码</label>
-                  <input
-                    id="login-pass"
-                    type="password"
-                    className="oci-input"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                  />
+                  <div className="oci-input-wrap">
+                    <span className="oci-input-icon">
+                      <Icon name="lock" size={16} />
+                    </span>
+                    <input
+                      id="login-pass"
+                      type={showPass ? 'text' : 'password'}
+                      className="oci-input oci-input-has-icon oci-input-has-eye"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="oci-input-eye"
+                      onClick={() => setShowPass((v) => !v)}
+                      aria-label={showPass ? '隐藏密码' : '显示密码'}
+                    >
+                      <Icon name={showPass ? 'eye-off' : 'eye'} size={16} />
+                    </button>
+                  </div>
                 </div>
+                <label className="oci-auth-remember">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                  />
+                  记住我
+                </label>
                 <button type="submit" className="oci-auth-submit" disabled={busy || !username || !password}>
                   {busy ? '登录中…' : '登录'}
                 </button>
+                <div className="oci-auth-security">
+                  <Icon name="shield" size={14} />
+                  端到端加密 · 自托管安全保障
+                </div>
               </form>
             </AuthCard>
           )}
         </div>
+        <div className="oci-login-attrib">OCI Manager · 自托管面板</div>
       </div>
     </div>
   )

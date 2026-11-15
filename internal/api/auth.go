@@ -13,6 +13,9 @@ const sessionCookie = "oci_session"
 // sessionMaxAge 与 auth 包的会话有效期保持一致。
 const sessionMaxAge = 7 * 24 * int(time.Hour/time.Second)
 
+// sessionMaxAgeRemember 勾选「记住我」后的会话有效期（30 天）。
+const sessionMaxAgeRemember = 30 * 24 * int(time.Hour/time.Second)
+
 // requireAuth 校验会话 Cookie，未登录时返回 401。
 func (s *Server) requireAuth(c *gin.Context) {
 	token, err := c.Cookie(sessionCookie)
@@ -41,9 +44,11 @@ func (s *Server) sessionSecure() bool {
 	return s.tlsMgr != nil && s.tlsMgr.HasCertificate()
 }
 
-func (s *Server) setSessionCookie(c *gin.Context, token string) {
+// setSessionCookie 写入会话 Cookie。maxAge<=0 表示会话级（浏览器关闭即失效），
+// 正数表示有效期秒数（勾选「记住我」时传 sessionMaxAgeRemember）。
+func (s *Server) setSessionCookie(c *gin.Context, token string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookie, token, sessionMaxAge, "/", "", s.sessionSecure(), true)
+	c.SetCookie(sessionCookie, token, maxAge, "/", "", s.sessionSecure(), true)
 }
 
 func (s *Server) clearSessionCookie(c *gin.Context) {
@@ -97,6 +102,7 @@ func (s *Server) authLogin(c *gin.Context) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, err)
@@ -113,7 +119,12 @@ func (s *Server) authLogin(c *gin.Context) {
 			respondError(c, err)
 			return
 		}
-		s.setSessionCookie(c, token)
+		// 勾选「记住我」延长到 30 天，否则会话级（关闭浏览器即失效）。
+		maxAge := 0
+		if body.Remember {
+			maxAge = sessionMaxAgeRemember
+		}
+		s.setSessionCookie(c, token, maxAge)
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -136,7 +147,7 @@ func (s *Server) authVerifyOTP(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	s.setSessionCookie(c, token)
+	s.setSessionCookie(c, token, sessionMaxAge)
 	respondOK(c, gin.H{"status": "ok", "username": username})
 }
 
@@ -174,6 +185,6 @@ func (s *Server) authChangePassword(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	s.setSessionCookie(c, token)
+	s.setSessionCookie(c, token, sessionMaxAge)
 	respondOK(c, gin.H{"status": "ok"})
 }

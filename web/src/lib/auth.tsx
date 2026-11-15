@@ -21,7 +21,7 @@ interface AuthContextValue {
   pendingChallenge: string
   refresh: () => Promise<void>
   setup: (username: string, password: string) => Promise<void>
-  login: (username: string, password: string) => Promise<LoginResult>
+  login: (username: string, password: string, remember?: boolean) => Promise<LoginResult>
   verifyOtp: (code: string) => Promise<void>
   logout: () => Promise<void>
   /** 会话过期时由调用方触发，回到登录页 */
@@ -77,8 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus(next)
   }, [])
 
-  const login = useCallback(async (name: string, password: string) => {
-    const result = await api.auth.login(name, password)
+  const login = useCallback(async (name: string, password: string, remember = false) => {
+    const result = await api.auth.login(name, password, remember)
     if (result.otp_required) {
       setPendingChallenge(result.challenge)
       return result

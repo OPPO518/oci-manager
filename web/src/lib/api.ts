@@ -109,10 +109,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ username, password }),
       }),
-    login: (username: string, password: string) =>
+    login: (username: string, password: string, remember: boolean) =>
       request<LoginResult>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
       }),
     verifyOtp: (challenge: string, code: string) =>
       request<{ status: string; username: string }>('/auth/otp', {

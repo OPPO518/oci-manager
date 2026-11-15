@@ -56,6 +56,7 @@ export type IconName =
   | 'users'
   | 'lock'
   | 'eye-off'
+  | 'moon'
 
 /** Redwood 线性图标，默认 16px。 */
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
@@ -251,6 +252,9 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
         <circle cx="12" cy="8" r="1.3" />
         <circle cx="6.5" cy="12" r="1.3" />
       </>
+    ),
+    moon: (
+      <path d="M13.5 9.5A6 6 0 0 1 6.5 2.5a6 6 0 1 0 7 7z" />
     ),
     key: (
       <>

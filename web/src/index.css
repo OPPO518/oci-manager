@@ -1293,6 +1293,7 @@
     display: grid;
     grid-template-columns: 1fr 2fr;
     min-height: 100vh;
+    position: relative;
   }
 
   .oci-login-brand {
@@ -1343,6 +1344,150 @@
     .oci-login-brand {
       display: none;
     }
+    .oci-login-topbar {
+      display: none;
+    }
+  }
+
+  /* 顶栏右上控件：语言 / 主题（占位） */
+  .oci-login-topbar {
+    position: absolute;
+    top: 16px;
+    right: 18px;
+    z-index: 5;
+    display: flex;
+    gap: 6px;
+  }
+
+  .oci-login-topbtn {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--rw-radius, 8px);
+    border: 0.5px solid var(--rw-border, rgba(0, 0, 0, 0.15));
+    background: rgba(255, 255, 255, 0.8);
+    color: var(--rw-ink, #1f1f1f);
+    cursor: pointer;
+  }
+
+  .oci-login-topbtn:hover {
+    background: #fff;
+  }
+
+  /* 左栏点阵球 + 上下分区 */
+  .oci-login-brand-top {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .oci-login-brand-globe {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    justify-content: center;
+    align-content: center;
+    gap: 7px;
+    max-width: 200px;
+    margin: 8px auto;
+    padding: 12px 0;
+  }
+
+  .oci-login-brand-bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .oci-login-brand-stat {
+    align-self: flex-start;
+    padding: 7px 12px;
+    border: 0.5px solid rgba(255, 255, 255, 0.25);
+    border-radius: var(--rw-radius, 8px);
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.88);
+  }
+
+  /* 输入框内联图标 + 密码显隐 */
+  .oci-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .oci-input-icon {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--rw-muted, #6b6b6b);
+    display: inline-flex;
+    pointer-events: none;
+  }
+
+  .oci-input-has-icon {
+    padding-left: 36px !important;
+  }
+
+  .oci-input-eye {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--rw-muted, #6b6b6b);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 4px;
+    border-radius: 6px;
+  }
+
+  .oci-input-eye:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--rw-ink, #1f1f1f);
+  }
+
+  .oci-input-has-eye {
+    padding-right: 36px !important;
+  }
+
+  /* 记住我 */
+  .oci-auth-remember {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--rw-muted, #6b6b6b);
+    margin: 2px 0 16px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .oci-auth-remember input {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--oracle-brand, #c74634);
+  }
+
+  /* 安全说明 */
+  .oci-auth-security {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--rw-muted, #6b6b6b);
+  }
+
+  /* 右栏底部署名 */
+  .oci-login-attrib {
+    position: absolute;
+    right: 24px;
+    bottom: 18px;
+    font-size: 11px;
+    color: var(--rw-muted, #9a9a9a);
   }
 
   /* ==================================================================
