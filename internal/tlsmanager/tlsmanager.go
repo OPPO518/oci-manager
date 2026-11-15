@@ -341,7 +341,10 @@ func (m *Manager) obtain(cfg ConfigInput, caDir string) error {
 
 	cfCfg := cloudflare.NewDefaultConfig()
 	cfCfg.AuthToken = cfg.CFAPIToken
-	cfCfg.TTL = 60
+	// Cloudflare/lego 要求 TTL 必须 >= 120（lego v4 校验 config.TTL < 120 即报错，
+	// 0 也会触发），固定写小值（如 60）会在初始化提供商阶段直接失败。
+	// 120 即 lego 的默认下限，对短生命周期的 _acme-challenge TXT 记录足够。
+	cfCfg.TTL = 120
 	cfCfg.PropagationTimeout = 3 * time.Minute
 	cfCfg.PollingInterval = 10 * time.Second
 	provider, err := cloudflare.NewDNSProviderConfig(cfCfg)
